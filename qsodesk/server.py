@@ -13,13 +13,14 @@ from urllib.parse import parse_qs, urlparse
 from . import contests
 from .audio import AudioEngine, cw_samples
 from .ft8 import FT8
-from .radio import RadioManager
+from .radio import RadioHub
 from .spaceweather import SpaceWeather
 from .store import Store, adif_record
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-VERSION = "0.3"
+VERSION = "0.4"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
+         "/transceivers": "transceivers.html",
          "/waterfall": "waterfall.html",
          "/cw": "cw.html", "/ft8": "ft8.html"}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -31,12 +32,30 @@ class App:
         self.store = Store(data_dir)
         self.clients = []
         self.clients_lock = threading.Lock()
-        self.radio = RadioManager(self.store.settings, lambda st: self.broadcast("radio", st))
-        self.radio.start()
-        self.audio = AudioEngine(self.store.settings, lambda: self.radio.state)
+        self.hub = RadioHub(self.store, lambda st: self.broadcast("radio", st))
+        self.audio = AudioEngine(self.audio_settings, lambda: self.radio.state)
         self.ft8 = FT8(self)
         self.audio.start()
         self.spacewx = SpaceWeather(data_dir)
+
+    # ---- transceivers -----------------------------------------------------
+    @property
+    def radio(self):
+        """The transceiver the waterfall, CW and FT8 pages are working with."""
+        return self.hub.get(self.store.settings().get("audio_radio"))
+
+    def rig(self, rid=None):
+        """A transceiver by id; with no id, the one the radio pages use."""
+        return self.hub.get(rid) if rid else self.radio
+
+    def audio_settings(self):
+        cfg = self.radio.cfg
+        return {"audio_source": "sim" if cfg.get("source") == "sim" else "auto",
+                "audio_device": cfg.get("audio", "")}
+
+    def radios(self):
+        return {"radios": self.hub.list(), "detected": self.hub.detected(),
+                "audio_radio": self.radio.id}
 
     # ---- CW ---------------------------------------------------------------
     def cw_send(self, b):
@@ -65,9 +84,9 @@ class App:
         ev = self.store.event(event_name) or self.store.event()
         return s, ev, contests.get(ev["contest"])
 
-    def snapshot(self):
+    def snapshot(self, rid=None):
         s, ev, c = self.ctx()
-        rs = self.radio.state
+        rs = self.rig(rid).state
         now = time.time()
         live = self.store.qsos(ev["name"])
         everything = self.store.qsos(ev["name"], include_deleted=True)
@@ -88,11 +107,13 @@ class App:
             "available": c.available(live, rs["band"], rs["mode"], now),
             "qsos": rows, "total_logged": len(live),
             "recovered": self.store.recovered, "audio": self.audio.status,
+            "radios": [{"id": r["id"], "name": r["name"]} for r in self.hub.list()],
+            "audio_radio": self.radio.id,
         }
 
     def check(self, p):
         s, ev, c = self.ctx()
-        rs = self.radio.state
+        rs = self.rig(p.get("radio")).state
         band = p.get("band") or rs["band"]
         mode = p.get("mode") or rs["mode"]
         live = self.store.qsos(ev["name"])
@@ -110,7 +131,8 @@ class App:
         if not call:
             return {"error": "No callsign"}
         s, ev, c = self.ctx(b.get("event"))
-        rs = self.radio.state
+        rig = self.rig(b.get("radio"))
+        rs = rig.state
         now = time.time()
         ts = float(b.get("ts") or now)
         if ts > now + 300 or ts < now - 14 * 86400:
@@ -130,7 +152,7 @@ class App:
             "serial_sent": int(sent) if str(sent or "").isdigit() else None,
             "serial_rcvd": (b.get("serial_rcvd") or "").strip(), "exch": exch,
             "name": (b.get("name") or "").strip(), "notes": (b.get("notes") or "").strip(),
-            "station": s.get("station", ""),
+            "station": rig.cfg.get("name") or s.get("station", ""),
             "operator": (b.get("operator") or s.get("operator") or s.get("callsign") or "").upper(),
         }
         row, saved, changed = self.store.add(q, c.serial_scope(band, s))
@@ -254,7 +276,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ft8":
             return self.send(app.ft8.status())
         if path == "/api/state":
-            return self.send(app.snapshot())
+            return self.send(app.snapshot(p.get("radio")))
+        if path == "/api/radios":
+            return self.send(app.radios())
         if path == "/api/check":
             return self.send(app.check(p))
         if path == "/api/events":
@@ -304,10 +328,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"qso": row, "saved": saved}, status=200 if row else 404)
         if path == "/api/settings":
             app.store.set_settings(b)
-            if any(k in b for k in ("radio_source", "rigctld_host", "rigctld_port")):
-                app.radio.reconfigure()
-            if any(k in b for k in ("audio_source", "audio_device")):
-                app.audio.reconfigure()
             app.broadcast("log", {})
             return self.send({"ok": True})
         if path == "/api/event":
@@ -319,11 +339,24 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"ok": True})
         if path == "/api/radio":
             try:
-                app.radio.tune(b.get("band"), b.get("mode"), b.get("freq"), b.get("rmode"))
+                app.rig(b.get("radio")).tune(b.get("band"), b.get("mode"), b.get("freq"),
+                                             b.get("rmode"))
             except Exception as exc:
                 return self.send({"error": str(exc)}, status=502)
             return self.send({"ok": True})
         try:
+            if path == "/api/radios/save":
+                app.hub.save(b.get("radios") or [])
+                app.audio.reconfigure()
+                app.broadcast("radios", {})
+                app.broadcast("log", {})
+                return self.send(app.radios())
+            if path == "/api/radios/listen":
+                app.store.set_settings({"audio_radio": b.get("id", "")})
+                app.audio.reconfigure()
+                app.broadcast("radios", {})
+                app.broadcast("radio", app.radio.state)
+                return self.send({"ok": True})
             if path == "/api/cw/send":
                 out = app.cw_send(b)
                 return self.send(out, status=400 if "error" in out else 200)
@@ -384,7 +417,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            q.put(("radio", app.radio.state))
+            for r in app.hub.list():
+                q.put(("radio", r["state"]))
             while True:
                 try:
                     kind, data = q.get(timeout=15)

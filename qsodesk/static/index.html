@@ -148,7 +148,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
 <div class="wrap">
   <header>
     <div class="logo">QSO<span>Desk</span></div>
-    <nav class="topnav"><a class="on" href="/">Logger</a><a href="/dashboard">Dashboard</a><a href="/waterfall">Waterfall</a><a href="/cw">CW</a><a href="/ft8">FT8</a></nav>
+    <nav class="topnav"><a class="on" href="/">Logger</a><a href="/dashboard">Dashboard</a><a href="/transceivers">Radios</a><a href="/waterfall">Waterfall</a><a href="/cw">CW</a><a href="/ft8">FT8</a></nav>
     <div class="me" id="me"></div>
     <select id="eventsel" title="Event"></select>
     <button id="newevent">New event</button>
@@ -169,6 +169,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
               <span class="tag" id="band">--</span>
               <span class="tag" id="rmode">--</span>
               <span class="tag" id="rigtag">--</span>
+              <select id="radiosel" title="Transceiver this device is logging with" style="display:none;padding:3px 8px;font-size:13px"></select>
               <span class="smeter" id="smeter" title="S-meter"></span>
             </div>
             <div class="btns" style="margin-top:8px">
@@ -241,18 +242,8 @@ dialog h2{margin:0 0 12px;font-size:18px}
     <label>Station callsign<input id="st-callsign" style="text-transform:uppercase"></label>
     <label>Operator callsign<input id="st-operator" style="text-transform:uppercase"></label>
     <label>Your NZART branch number<input id="st-branch" placeholder="blank or 00 for home station"></label>
-    <label>Station name<input id="st-station"></label>
-    <label>Radio<select id="st-radio_source">
-      <option value="auto">Automatic (find IC-7300 / IC-705 on USB)</option>
-      <option value="sim">Simulated radio</option>
-      <option value="rigctld">Hamlib rigctld at the address below</option></select></label>
-    <label>rigctld address : port<span style="display:flex;gap:6px"><input id="st-rigctld_host" style="flex:1"><input id="st-rigctld_port" style="width:80px"></span></label>
     <label>Grid locator (for FT8)<input id="st-grid" placeholder="e.g. RE53" style="text-transform:uppercase"></label>
-    <label>Radio audio<select id="st-audio_source">
-      <option value="auto">Automatic (radio's USB sound card)</option>
-      <option value="sim">Simulated audio</option>
-      <option value="device">Sound device named below</option></select></label>
-    <label class="wide">Sound device (leave blank to find the radio automatically)<input id="st-audio_device" placeholder="plughw:CARD=CODEC,DEV=0"></label>
+    <p class="muted wide" style="grid-column:1/3;margin:0">Radios are set up on the <a href="/transceivers" style="color:var(--blue)">Radios page</a>.</p>
     <label class="wide">Backup folder (e.g. a USB stick) - every contact is also copied here as it is logged<input id="st-mirror_dir" placeholder="/media/usb/qsodesk"></label>
     <label class="wide">Trans-Tasman serial numbers<select id="st-tt_serial_per_band">
       <option value="0">One series (single operator, multi-single)</option>
@@ -305,6 +296,8 @@ let checkSeq = 0;
 let checkedKey = "";       // what the last finished check was for
 let editing = null;
 let online = true;
+let radioId = "";          // the transceiver this device logs with
+try { radioId = localStorage.getItem("qsodesk_radio") || ""; } catch (e) {}
 const minSerial = {};      // highest serial handed out locally, per scope
 
 /* ---------- offline queue: contacts wait here until the Pi confirms ---------- */
@@ -366,8 +359,9 @@ function showSaved(res) {
 
 /* ---------- state ---------- */
 async function refresh() {
-  try { S = await api("/api/state"); setOnline(true); } catch (e) { setOnline(false); return; }
-  if (!R.freq) R = S.radio;
+  try { S = await api("/api/state?radio=" + encodeURIComponent(radioId)); setOnline(true); } catch (e) { setOnline(false); return; }
+  if (!S.radios.some(r => r.id === radioId)) radioId = S.radio.id;
+  if (!R.freq || R.id !== radioId) R = S.radio;
   render();
 }
 
@@ -384,6 +378,9 @@ function render() {
   $("me").textContent = st.callsign || "set your callsign → Settings";
   $("eventsel").innerHTML = S.events.map(e => `<option ${e.name === S.event.name ? "selected" : ""}>${esc(e.name)}</option>`).join("");
   $("version").textContent = "QSODesk " + S.version;
+  const sel = $("radiosel");
+  sel.style.display = S.radios.length > 1 ? "" : "none";
+  sel.innerHTML = S.radios.map(r => `<option value="${esc(r.id)}" ${r.id === radioId ? "selected" : ""}>${esc(r.name)}</option>`).join("");
 
   // entry fields for this contest
   const has = f => c.fields.includes(f);
@@ -473,7 +470,8 @@ function renderRadio() {
   $("band").textContent = r.band || "out of band";
   $("rmode").textContent = r.rmode || "--";
   const tag = $("rigtag");
-  tag.textContent = !r.connected ? "NO RADIO" : r.simulated ? "SIMULATED RADIO" : r.name;
+  const many = S && S.radios.length > 1;
+  tag.textContent = (many ? "" : (r.label ? r.label + ": " : "")) + (!r.connected ? "NO RADIO" : r.simulated ? "SIMULATED" : r.name);
   tag.className = "tag " + (!r.connected ? "bad" : r.simulated ? "sim" : "live");
   $("rignote").textContent = r.note || "";
   let bars = "";
@@ -489,7 +487,9 @@ function renderRadio() {
 function connect() {
   const es = new EventSource("/api/events");
   es.addEventListener("radio", e => {
-    const prev = R; R = JSON.parse(e.data);
+    const msg = JSON.parse(e.data);
+    if (radioId && msg.id !== radioId) return;         // another station's radio
+    const prev = R; R = msg;
     renderRadio();
     if (prev.band !== R.band || prev.mode !== R.mode) {
       $("rsts").value = rstDefault(); $("rstr").value = rstDefault();
@@ -497,6 +497,7 @@ function connect() {
     }
   });
   es.addEventListener("log", () => refresh().then(check));
+  es.addEventListener("radios", () => refresh());
   es.onopen = () => { setOnline(true); flush(); };
   es.onerror = () => setOnline(false);
 }
@@ -514,7 +515,7 @@ async function check() {
   const seq = ++checkSeq, key = checkKey();
   try {
     const typed = exchAuto ? "" : $("exch").value.trim();
-    const r = await api(`/api/check?call=${encodeURIComponent(call)}&band=${encodeURIComponent(R.band || "")}&mode=${R.mode || ""}&exch=${encodeURIComponent(typed)}`, null, 700);
+    const r = await api(`/api/check?call=${encodeURIComponent(call)}&band=${encodeURIComponent(R.band || "")}&mode=${R.mode || ""}&exch=${encodeURIComponent(typed)}&radio=${encodeURIComponent(radioId)}`, null, 700);
     if (seq !== checkSeq) return;
     checkedKey = key;
     setStatus(r.status, r.msg);
@@ -551,7 +552,7 @@ async function submit() {
   const serial = nextSerial();
   const q = {
     uuid: (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2)),
-    event: S.event.name, ts: Date.now() / 1000, call: call,
+    event: S.event.name, radio: radioId, ts: Date.now() / 1000, call: call,
     band: R.band, mode: R.mode, rmode: R.rmode, freq: R.freq,
     rst_sent: $("rsts").value.trim(), rst_rcvd: $("rstr").value.trim(),
     serial_sent: serial, serial_rcvd: $("srx").value.trim(),
@@ -580,8 +581,12 @@ $("exch").addEventListener("input", () => { exchAuto = false; dupeArmed = false;
 $("logbtn").addEventListener("click", submit);
 
 /* ---------- radio buttons, available-again, table clicks ---------- */
-$("bandbtns").addEventListener("click", e => { const b = e.target.dataset.band; if (b) api("/api/radio", {band: b}); $("call").focus(); });
-$("modebtns").addEventListener("click", e => { const m = e.target.dataset.mode; if (m) api("/api/radio", {mode: m, band: R.band}); $("call").focus(); });
+$("bandbtns").addEventListener("click", e => { const b = e.target.dataset.band; if (b) api("/api/radio", {band: b, radio: radioId}); $("call").focus(); });
+$("modebtns").addEventListener("click", e => { const m = e.target.dataset.mode; if (m) api("/api/radio", {mode: m, band: R.band, radio: radioId}); $("call").focus(); });
+$("radiosel").addEventListener("change", e => {
+  radioId = e.target.value; try { localStorage.setItem("qsodesk_radio", radioId); } catch (err) {}
+  R = {}; refresh().then(() => { clearEntry(); renderRadio(); });
+});
 $("avail").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   $("call").value = b.dataset.call; check(); nextField("call");
@@ -613,7 +618,7 @@ $("ed-delete").onclick = async () => {
 };
 
 /* ---------- settings and new event ---------- */
-const SETTINGS = ["callsign", "operator", "branch", "station", "radio_source", "rigctld_host", "rigctld_port", "mirror_dir", "tt_serial_per_band", "grid", "audio_source", "audio_device"];
+const SETTINGS = ["callsign", "operator", "branch", "mirror_dir", "tt_serial_per_band", "grid"];
 $("opensettings").onclick = () => { for (const k of SETTINGS) $("st-" + k).value = S.settings[k] || ""; $("dlg-settings").showModal(); };
 $("st-cancel").onclick = () => $("dlg-settings").close();
 $("st-save").onclick = async () => {

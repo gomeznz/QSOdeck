@@ -17,16 +17,18 @@ const QD = (() => {
   }
 
   /* ---------- page header: navigation, radio read-out, clock ---------- */
-  const state = {radio: {}, handlers: {}};
+  const state = {radio: {}, radios: {}, listen: "", handlers: {}};
   function on(name, cb) { (state.handlers[name] = state.handlers[name] || []).push(cb); }
   function emit(name, data) { (state.handlers[name] || []).forEach(cb => cb(data)); }
 
   function header(active) {
-    const links = [["/", "Logger", "log"], ["/dashboard", "Dashboard", "dashboard"], ["/waterfall", "Waterfall", "waterfall"], ["/cw", "CW", "cw"], ["/ft8", "FT8", "ft8"]];
+    const links = [["/", "Logger", "log"], ["/dashboard", "Dashboard", "dashboard"], ["/transceivers", "Radios", "radios"], ["/waterfall", "Waterfall", "waterfall"], ["/cw", "CW", "cw"], ["/ft8", "FT8", "ft8"]];
     $("hdr").innerHTML = `<a class="logo" href="/">QSO<span>Desk</span></a><nav>` +
       links.map(l => `<a href="${l[0]}" class="${l[2] === active ? "on" : ""}">${l[1]}</a>`).join("") +
       `</nav><div class="spacer"></div><span class="hfreq" id="h-freq"></span><span class="tag" id="h-mode"></span>` +
-      `<span class="tag" id="h-rig"></span><span class="tag" id="h-audio"></span>` +
+      `<span class="tag" id="h-rig"></span>` +
+      `<select id="h-listen" title="Transceiver used by the waterfall, CW and FT8 pages" style="display:none;padding:3px 8px;font-size:13px"></select>` +
+      `<span class="tag" id="h-audio"></span>` +
       `<div class="clock"><span id="h-clock"></span><small id="h-utc"></small></div>`;
     const tick = () => {
       const d = new Date();
@@ -35,7 +37,13 @@ const QD = (() => {
     };
     setInterval(tick, 500); tick();
     const es = new EventSource("/api/events");
-    es.addEventListener("radio", e => { state.radio = JSON.parse(e.data); showRadio(); emit("radio", state.radio); });
+    es.addEventListener("radio", e => {
+      const r = JSON.parse(e.data);
+      state.radios[r.id] = r; emit("anyradio", r);
+      if (!state.listen || r.id === state.listen) { state.radio = r; showRadio(); emit("radio", r); }
+    });
+    es.addEventListener("radios", () => { refreshAudioTag(); emit("radios"); });
+    $("h-listen").addEventListener("change", async e => { await api("/api/radios/listen", {id: e.target.value}); refreshAudioTag(); });
     es.addEventListener("log", () => emit("log"));
     es.addEventListener("ft8", () => emit("ft8"));
     refreshAudioTag();
@@ -47,15 +55,22 @@ const QD = (() => {
     $("h-freq").textContent = (r.freq / 1e6).toFixed(4) + " MHz";
     $("h-mode").textContent = (r.band || "?") + " " + (r.rmode || "");
     const t = $("h-rig");
-    t.textContent = !r.connected ? "NO RADIO" : r.simulated ? "SIMULATED RADIO" : r.name;
+    const many = state.app && state.app.radios.length > 1;      // the selector already names it
+    t.textContent = (r.label && !many ? r.label + ": " : "") + (!r.connected ? "NO RADIO" : r.simulated ? "SIMULATED" : r.name);
     t.className = "tag " + (!r.connected ? "bad" : r.simulated ? "sim" : "live");
   }
   async function refreshAudioTag() {
     try {
       const s = await api("/api/state");
       state.app = s;
+      if (state.listen !== s.audio_radio) {
+        state.listen = s.audio_radio; state.radio = state.radios[s.audio_radio] || s.radio; showRadio(); emit("radio", state.radio);
+      }
+      const sel = $("h-listen");
+      sel.style.display = s.radios.length > 1 ? "" : "none";
+      sel.innerHTML = s.radios.map(r => `<option value="${esc(r.id)}" ${r.id === s.audio_radio ? "selected" : ""}>${esc(r.name)}</option>`).join("");
       const t = $("h-audio");
-      t.textContent = s.audio.source === "sim" ? "SIMULATED AUDIO" : "RADIO AUDIO";
+      t.textContent = s.audio.source === "sim" ? "SIM AUDIO" : "LIVE AUDIO";
       t.className = "tag " + (s.audio.source === "sim" ? "sim" : "live");
       t.title = s.audio.note || s.audio.device || "";
       emit("app", s);

@@ -3,9 +3,9 @@
 A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
-**Version 0.3.** The logger (fast entry line, Jock White Field Day and
-Trans-Tasman rules, crash-proof storage, one radio) plus a customisable **dashboard**
-and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
+**Version 0.4.** The logger (fast entry line, Jock White Field Day and
+Trans-Tasman rules, crash-proof storage, one radio) plus a **transceiver manager** for several radios, a customisable
+**dashboard** and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
 
@@ -91,6 +91,28 @@ Radio menu settings that matter:
 
 Any other Hamlib-supported radio: run `rigctld` yourself and choose
 "Hamlib rigctld at the address below" in Settings.
+
+## Radios (transceiver manager)
+
+The **Radios** page lists every transceiver QSODesk is connected to, each with
+its live frequency, mode and S-meter. Add as many as you like and give each a
+name, such as "80 m station".
+
+- **Connections:** automatic (first Icom found on USB), a particular USB radio,
+  Hamlib `rigctld` on the network (any Hamlib radio, including one on another
+  Pi), or a simulated radio.
+- **Plugged-in radios are offered** at the top of the page with an "Add it"
+  button.
+- **Each logging device picks its own radio**, on the Radios page or from the
+  selector on the Logger. Two laptops at two stations log at the same time,
+  each following its own radio's band and mode, with separate serial numbers
+  per band where the contest calls for it. The radio's name is recorded with
+  each contact as the station.
+- **Waterfall, CW and FT8** work with one transceiver at a time. Choose which
+  on the Radios page or from the selector at the top of those pages.
+
+Tested with simulated radios only. Running two real USB radios on one Pi
+(each needs its own Hamlib port and sound card) has not been tried yet.
 
 ## Dashboard
 

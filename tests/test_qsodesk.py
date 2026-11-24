@@ -154,6 +154,33 @@ class SpaceWx(unittest.TestCase):
         self.assertEqual(sw.build({})["kp"], None)            # nothing fetched: no crash
 
 
+class Transceivers(unittest.TestCase):
+    def test_hub(self):
+        import time
+        from qsodesk.radio import RadioHub
+        with tempfile.TemporaryDirectory() as d:
+            st = Store(d)
+            seen = []
+            hub = RadioHub(st, seen.append)
+            self.assertEqual([r["id"] for r in hub.list()], ["r1"])          # old single radio carried over
+            hub.save([{"id": "r1", "name": "80 m station", "source": "sim"},
+                      {"name": "40 m station", "source": "sim"}])
+            self.assertEqual([(r["id"], r["name"]) for r in hub.list()],
+                             [("r1", "80 m station"), ("r2", "40 m station")])
+            time.sleep(1.2)
+            hub.get("r2").tune(band="40m", mode="CW")
+            time.sleep(1.0)
+            self.assertEqual(hub.get("r1").state["band"], "80m")              # independent radios
+            self.assertEqual((hub.get("r2").state["band"], hub.get("r2").state["mode"]), ("40m", "CW"))
+            self.assertEqual(hub.get("r2").state["label"], "40 m station")
+            self.assertEqual(hub.get("nope").id, "r1")
+            hub.save([{"id": "r2", "name": "40 m station", "source": "sim"}])
+            self.assertEqual([r["id"] for r in hub.list()], ["r2"])
+            with self.assertRaises(ValueError):
+                hub.save([])
+            self.assertEqual(RadioHub(st, seen.append).list()[0]["name"], "40 m station")   # survives restart
+
+
 class Storage(unittest.TestCase):
     def entry(self, n, band="80m"):
         return {"uuid": "u%d" % n, "event": "Practice - Jock White", "contest": "jwfd",
