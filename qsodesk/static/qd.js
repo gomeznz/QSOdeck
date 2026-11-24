@@ -22,7 +22,7 @@ const QD = (() => {
   function emit(name, data) { (state.handlers[name] || []).forEach(cb => cb(data)); }
 
   function header(active) {
-    const links = [["/", "Logger", "log"], ["/dashboard", "Dashboard", "dashboard"], ["/transceivers", "Radios", "radios"], ["/waterfall", "Waterfall", "waterfall"], ["/cw", "CW", "cw"], ["/ft8", "FT8", "ft8"]];
+    const links = [["/", "Logger", "log"], ["/dashboard", "Dashboard", "dashboard"], ["/transceivers", "Radios", "radios"], ["/waterfall", "Waterfall", "waterfall"], ["/cw", "CW", "cw"], ["/ft8", "FT8", "ft8"], ["/keypad", "Keypad", "keypad"]];
     $("hdr").innerHTML = `<a class="logo" href="/">QSO<span>Desk</span></a><nav>` +
       links.map(l => `<a href="${l[0]}" class="${l[2] === active ? "on" : ""}">${l[1]}</a>`).join("") +
       `</nav><div class="spacer"></div><span class="hfreq" id="h-freq"></span><span class="tag" id="h-mode"></span>` +

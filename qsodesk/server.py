@@ -20,7 +20,7 @@ from .store import Store, adif_record
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 VERSION = "0.4"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
-         "/transceivers": "transceivers.html",
+         "/transceivers": "transceivers.html", "/keypad": "keypad.html",
          "/waterfall": "waterfall.html",
          "/cw": "cw.html", "/ft8": "ft8.html"}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -336,6 +336,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({"error": "Give the event a name"}, status=400)
             app.store.create_event(name, b.get("contest") or "general")
             app.broadcast("log", {})
+            return self.send({"ok": True})
+        if path == "/api/radio/step":
+            try:
+                rig = app.rig(b.get("radio"))
+                rig.tune(freq=max(100000, int(rig.state.get("freq") or 0) + int(b.get("delta") or 0)))
+            except Exception as exc:
+                return self.send({"error": str(exc)}, status=502)
             return self.send({"ok": True})
         if path == "/api/radio":
             try:

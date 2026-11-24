@@ -64,6 +64,7 @@
   </div>
 </div>
 <script src="/static/qd.js"></script>
+<script src="/static/keys.js"></script>
 <script>
 "use strict";
 const {$, api, esc, pad} = QD;
@@ -154,7 +155,7 @@ QD.on("app", s => {
     ? "Simulated radio: what you send is played into the pretend receiver, so you will see it on the waterfall and decoded on the left."
     : "Sent by the radio's own keyer, so the timing is perfect whatever the Pi is doing. Turn on break-in on the radio.";
 });
-QD.on("log", () => {});
+window.QSODeskContext = () => ({call: $("dx").value.trim()});
 function modeNote() {
   const r = QD.state.radio;
   $("modenote").innerHTML = r.mode && r.mode !== "CW"

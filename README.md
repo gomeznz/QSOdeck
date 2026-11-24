@@ -4,7 +4,7 @@ A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
 **Version 0.4.** The logger (fast entry line, Jock White Field Day and
-Trans-Tasman rules, crash-proof storage, one radio) plus a **transceiver manager** for several radios, a customisable
+Trans-Tasman rules, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
 **dashboard** and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
@@ -113,6 +113,31 @@ name, such as "80 m station".
 
 Tested with simulated radios only. Running two real USB radios on one Pi
 (each needs its own Hamlib port and sound card) has not been tried yet.
+
+## Keypad (custom key mapping)
+
+A cheap USB macro keypad, such as the 12-key "12KV2" and "12KV3" pads with
+two or three knobs, turns QSODesk into a one-handed contest station. Any
+spare keys on a normal keyboard work the same way.
+
+On the **Keypad** page, press "Map a key", press the key (or turn the knob),
+and choose what it does:
+
+- send a CW message, with your call, their call, serial and branch filled in
+- stop sending, log the contact, clear the entry line, jump to the callsign box
+- tune up or down by a step you choose (made for a knob), next band, next mode
+- CW speed up or down, switch transceiver, FT8 call CQ or halt, open a page
+
+The map is stored on the Pi and works on every page and every device. A
+suggested 12-key layout can be loaded with one button.
+
+Set the keypad's keys to **F13-F24** with the maker's tool first (the keypad
+remembers them). Those keys are used by nothing else, so they never clash
+with typing. Give each knob direction its own key too, not the volume
+setting.
+
+The keypad must be plugged into the computer whose browser you are logging
+on. Tested with simulated key presses; not yet tried with a physical keypad.
 
 ## Dashboard
 
