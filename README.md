@@ -3,9 +3,9 @@
 A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
-**Version 0.2.** The logger (fast entry line, Jock White Field Day and
-Trans-Tasman rules, crash-proof storage, one radio) plus three radio pages:
-a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
+**Version 0.3.** The logger (fast entry line, Jock White Field Day and
+Trans-Tasman rules, crash-proof storage, one radio) plus a customisable **dashboard**
+and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
 
@@ -92,6 +92,25 @@ Radio menu settings that matter:
 Any other Hamlib-supported radio: run `rigctld` yourself and choose
 "Hamlib rigctld at the address below" in Settings.
 
+## Dashboard
+
+A page of cards for a shack monitor or the club tent: callsign, local time,
+UTC, world clock, space weather, magnetic storm watch, an HF band guide, the
+radio, contest score and recent contacts.
+
+Press **Customise** to add, remove, reorder or widen cards, choose the places
+on the world clock, and retitle any card. The layout is saved on the Pi, so
+every device sees the same dashboard.
+
+Space weather comes from NOAA's Space Weather Prediction Center and needs
+internet. The Pi fetches it every 10 minutes while a dashboard is open and
+keeps the last copy, so offline the cards show the old figures and say so.
+
+- The NOAA feed readers are written from the documented layouts but have not
+  yet been run against the live feeds.
+- The HF band guide is a rough rule of thumb from solar flux and Kp, not a
+  path prediction.
+
 ## Waterfall, CW and FT8
 
 All three pages use one audio stream from the radio's USB sound card. With no
@@ -149,6 +168,7 @@ What has and has not been tested:
     qsodesk/radio.py        simulated radio and Hamlib (rigctld) control
     qsodesk/audio.py        audio from the radio, and the audio simulator
     qsodesk/ft8.py          FT8 timing, sequencing and logging
+    qsodesk/spaceweather.py NOAA space weather for the dashboard
     qsodesk/server.py       web server and exports
     qsodesk/static/         the web pages (qd.js holds the waterfall and CW decoder)
     tools/install-ft8.sh    installs the FT8 engine on a Pi

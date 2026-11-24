@@ -14,11 +14,13 @@ from . import contests
 from .audio import AudioEngine, cw_samples
 from .ft8 import FT8
 from .radio import RadioManager
+from .spaceweather import SpaceWeather
 from .store import Store, adif_record
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-VERSION = "0.2"
-PAGES = {"/": "index.html", "/index.html": "index.html", "/waterfall": "waterfall.html",
+VERSION = "0.3"
+PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
+         "/waterfall": "waterfall.html",
          "/cw": "cw.html", "/ft8": "ft8.html"}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
          ".css": "text/css"}
@@ -34,6 +36,7 @@ class App:
         self.audio = AudioEngine(self.store.settings, lambda: self.radio.state)
         self.ft8 = FT8(self)
         self.audio.start()
+        self.spacewx = SpaceWeather(data_dir)
 
     # ---- CW ---------------------------------------------------------------
     def cw_send(self, b):
@@ -246,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(fh.read(), TYPES[ext])
         if path == "/api/audio":
             return self.audio_stream()
+        if path == "/api/spaceweather":
+            return self.send(app.spacewx.get())
         if path == "/api/ft8":
             return self.send(app.ft8.status())
         if path == "/api/state":

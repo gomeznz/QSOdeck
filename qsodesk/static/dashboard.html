@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - Dashboard</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;min-width:0;position:relative}
+.card.wide{grid-column:span 2}
+@media(max-width:700px){.card.wide{grid-column:span 1}}
+.card h3{margin:0 0 10px;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-weight:600}
+.tools{display:none;gap:4px;position:absolute;top:8px;right:8px}
+.editing .tools{display:flex}
+.editing .card{border-style:dashed;border-color:var(--amber)}
+.tools button{padding:2px 8px;font-size:13px}
+.mono{font-family:var(--mono)}
+.huge{font-family:var(--mono);font-weight:800;font-size:54px;line-height:1;color:var(--amber);letter-spacing:1px;word-break:break-all}
+.big{font-family:var(--mono);font-weight:700;font-size:40px;line-height:1.05}
+.sub{color:var(--dim);margin-top:6px}
+.zones{display:grid;grid-template-columns:1fr auto auto;gap:6px 12px;align-items:baseline}
+.zones b{font-family:var(--mono);font-size:20px}
+.zones small{color:var(--dim)}
+.dn{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px;background:#3a4a60}
+.dn.day{background:var(--amber)}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.num b{display:block;font-family:var(--mono);font-size:26px}
+.num span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+.kpbars{display:flex;gap:4px;align-items:flex-end;height:54px;margin-top:12px}
+.kpbars i{flex:1;border-radius:3px 3px 0 0;min-height:3px}
+.scale{display:inline-block;font-family:var(--mono);font-weight:700;padding:3px 9px;border-radius:7px;margin-right:6px;background:var(--panel2);border:1px solid var(--line)}
+.lv0{color:var(--green)} .lv1{color:#e8d44d} .lv2{color:var(--amber)} .lv3{color:#ff8a3d} .lv4,.lv5{color:var(--red)}
+.status{font-size:24px;font-weight:700;margin-bottom:6px}
+.alert{border-left:3px solid var(--amber);padding:4px 0 4px 10px;margin-top:8px;font-size:14px}
+.alert.ALERT,.alert.CONTINUED{border-color:var(--red)}
+.alert small{display:block;color:var(--dim);font-family:var(--mono);font-size:12px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+table.t td,table.t th{padding:5px 6px;text-align:left}
+table.t th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.8px}
+.Good{color:var(--green);font-weight:700} .Fair{color:var(--amber);font-weight:700} .Poor{color:var(--red);font-weight:700}
+.foot{color:var(--dim);font-size:12px;margin-top:10px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(520px,94vw)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog h2{margin:0 0 12px;font-size:18px}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pick button{text-align:left}
+.pick button small{display:block;color:var(--dim);font-size:12px}
+.chk{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;max-height:300px;overflow-y:auto}
+.chk label{font-size:14px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);margin-bottom:10px}
+.field input{color:var(--text)}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="bar">
+    <span class="muted" id="hint"></span>
+    <div class="spacer"></div>
+    <button id="add" style="display:none">+ Add card</button>
+    <button id="reset" style="display:none">Reset layout</button>
+    <button id="edit">Customise</button>
+  </div>
+  <div class="cards" id="cards"></div>
+</div>
+
+<dialog id="dlg-add"><h2>Add a card</h2><div class="pick" id="pick"></div>
+  <div class="actions"><button id="add-cancel">Close</button></div></dialog>
+<dialog id="dlg-cfg"><h2 id="cfg-title">Card settings</h2><div id="cfg-body"></div>
+  <div class="actions"><button id="cfg-cancel">Cancel</button><button class="primary" id="cfg-save">Save</button></div></dialog>
+
+<script src="/static/qd.js"></script>
+<script>
+"use strict";
+const {$, api, esc, pad} = QD;
+QD.header("dashboard");
+
+let app = null, wx = null, layout = [], editing = false;
+const ZONES = [["UTC", "UTC"], ["Auckland", "Pacific/Auckland"], ["Sydney", "Australia/Sydney"], ["Brisbane", "Australia/Brisbane"],
+  ["Perth", "Australia/Perth"], ["Tokyo", "Asia/Tokyo"], ["Beijing", "Asia/Shanghai"], ["Singapore", "Asia/Singapore"],
+  ["Delhi", "Asia/Kolkata"], ["Dubai", "Asia/Dubai"], ["Moscow", "Europe/Moscow"], ["Johannesburg", "Africa/Johannesburg"],
+  ["Berlin", "Europe/Berlin"], ["London", "Europe/London"], ["Sao Paulo", "America/Sao_Paulo"], ["New York", "America/New_York"],
+  ["Chicago", "America/Chicago"], ["Denver", "America/Denver"], ["Los Angeles", "America/Los_Angeles"], ["Honolulu", "Pacific/Honolulu"],
+  ["Fiji", "Pacific/Fiji"], ["Chatham Is.", "Pacific/Chatham"], ["Rarotonga", "Pacific/Rarotonga"], ["Scott Base", "Antarctica/McMurdo"]];
+const DEFAULT = [
+  {type: "callsign"}, {type: "local"}, {type: "utc"},
+  {type: "world", cfg: {zones: ["Australia/Sydney", "Asia/Tokyo", "Europe/London", "America/New_York", "America/Los_Angeles"]}},
+  {type: "spacewx"}, {type: "storm"}, {type: "bands"}, {type: "radio"},
+];
+const timeIn = (tz, opts) => new Intl.DateTimeFormat("en-NZ", Object.assign({timeZone: tz, hour12: false}, opts)).format(new Date());
+const kpColour = k => k >= 7 ? "#ff5f5f" : k >= 5 ? "#ff8a3d" : k >= 4 ? "#ffb224" : k >= 3 ? "#e8d44d" : "#3ddc84";
+const wxFoot = () => {
+  if (!wx) return "";
+  if (!wx.data) return wx.loading ? "Fetching from NOAA..." : esc(wx.error || "No data yet");
+  const mins = Math.round(wx.age / 60);
+  return "NOAA SWPC, updated " + (mins < 1 ? "just now" : mins < 90 ? mins + " min ago" : Math.round(mins / 60) + " h ago") +
+    (wx.error ? " - <b style=\"color:var(--amber)\">" + esc(wx.error) + ", showing the last copy</b>" : "");
+};
+const noWx = () => `<p class="muted">${wxFoot() || "Loading..."}</p>`;
+
+/* Each card: a title, a render function, and optionally settings. render() is
+   called once a second for clocks (fast: true) or whenever data changes. */
+const TYPES = {
+  callsign: {name: "Callsign", about: "Your callsign, large", render(c) {
+    const s = app ? app.settings : {};
+    return `<div class="huge">${esc((c.cfg.text || s.callsign || "CALLSIGN").toUpperCase())}</div>` +
+      `<div class="sub">${esc(c.cfg.line || [s.grid, s.branch ? "Branch " + s.branch : "", s.station].filter(Boolean).join("  ·  "))}</div>`;
+  }, settings: [["text", "Callsign to show (blank = from Settings)"], ["line", "Line underneath (blank = grid and branch)"]]},
+
+  local: {name: "Local time", about: "Clock and date where you are", fast: true, render() {
+    const d = new Date();
+    return `<div class="big">${pad(d.getHours())}:${pad(d.getMinutes())}<span style="color:var(--dim);font-size:26px">:${pad(d.getSeconds())}</span></div>` +
+      `<div class="sub">${d.toLocaleDateString("en-NZ", {weekday: "long", day: "numeric", month: "long", year: "numeric"})}</div>`;
+  }},
+
+  utc: {name: "UTC", about: "Coordinated Universal Time", fast: true, render() {
+    const d = new Date();
+    return `<div class="big" style="color:var(--blue)">${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}<span style="font-size:26px;opacity:.6">:${pad(d.getUTCSeconds())}</span> <span style="font-size:20px">Z</span></div>` +
+      `<div class="sub">${d.toLocaleDateString("en-NZ", {timeZone: "UTC", weekday: "long", day: "numeric", month: "long"})}</div>`;
+  }},
+
+  world: {name: "World clock", about: "Times in places you choose", fast: true, render(c) {
+    const rows = (c.cfg.zones || []).map(tz => {
+      const z = ZONES.find(x => x[1] === tz); if (!z) return "";
+      const hour = Number(timeIn(tz, {hour: "2-digit"}).slice(0, 2));
+      return `<span><i class="dn ${hour >= 6 && hour < 18 ? "day" : ""}"></i>${esc(z[0])}</span><b>${timeIn(tz, {hour: "2-digit", minute: "2-digit"})}</b>` +
+        `<small>${timeIn(tz, {weekday: "short"})}</small>`;
+    }).join("");
+    return rows ? `<div class="zones">${rows}</div>` : `<p class="muted">No places chosen. Use Customise to add some.</p>`;
+  }, zones: true},
+
+  spacewx: {name: "Space weather", about: "Solar flux, Kp, solar wind, NOAA scales", render() {
+    if (!wx || !wx.data) return noWx();
+    const d = wx.data, n = d.scales.now || {R: 0, S: 0, G: 0};
+    const v = (x, dp) => x == null ? "--" : Number(x).toFixed(dp || 0);
+    return `<div class="nums"><div class="num"><b>${v(d.sfi)}</b><span>Solar flux</span></div>` +
+      `<div class="num"><b style="color:${kpColour(d.kp || 0)}">${v(d.kp, 1)}</b><span>Kp index</span></div>` +
+      `<div class="num"><b>${v(d.a)}</b><span>A index</span></div>` +
+      `<div class="num"><b>${v(d.wind)}</b><span>Wind km/s</span></div>` +
+      `<div class="num"><b style="color:${d.bz != null && d.bz < -5 ? "var(--red)" : "inherit"}">${v(d.bz, 1)}</b><span>Bz nT</span></div>` +
+      `<div class="num"><b>${v(d.bt, 1)}</b><span>Bt nT</span></div></div>` +
+      `<div class="kpbars" title="Kp over the last 24 hours">${d.kp_history.map(k => `<i style="height:${Math.max(6, k / 9 * 100)}%;background:${kpColour(k)}"></i>`).join("")}</div>` +
+      `<div class="foot" style="margin-top:4px">Kp, last 24 hours</div>` +
+      `<div style="margin-top:10px"><span class="scale lv${n.R}" title="Radio blackouts">R${n.R}</span><span class="scale lv${n.S}" title="Solar radiation storms">S${n.S}</span><span class="scale lv${n.G}" title="Geomagnetic storms">G${n.G}</span></div>` +
+      `<div class="foot">${wxFoot()}</div>`;
+  }},
+
+  storm: {name: "Magnetic storm watch", about: "Geomagnetic conditions, forecast and warnings", wide: true, render() {
+    if (!wx || !wx.data) return noWx();
+    const d = wx.data, g = (d.scales.now || {}).G || 0, kr = Math.round(d.kp || 0);
+    const fc = d.scales.forecast.map(f => `<td><span class="scale lv${f.G}">G${f.G}</span><div class="foot" style="margin:2px 0 0">${esc(f.date.slice(5))}</div></td>`).join("");
+    const alerts = d.alerts.map(a => `<div class="alert ${esc(a.kind.split(" ")[0])}"><b>${esc(a.kind)}</b>: ${esc(a.text)}<small>${esc(a.issued)} UTC</small></div>`).join("");
+    return `<div class="status" style="color:${kpColour(d.kp || 0)}">${esc(d.kp_word || "Unknown")}</div>` +
+      `<div class="muted">Kp ${d.kp == null ? "--" : d.kp.toFixed(1)} now${g ? ", NOAA scale G" + g : ""}. ` +
+      (kr >= 5 ? "Expect disturbed HF, especially on polar paths." : kr >= 4 ? "Conditions are unsettled; higher bands may fade." : "No storm in progress.") + `</div>` +
+      (fc ? `<table class="t" style="margin-top:10px;width:auto"><tr><th colspan="3">Storm forecast, next 3 days</th></tr><tr>${fc}</tr></table>` : "") +
+      (alerts || `<p class="muted" style="margin:10px 0 0">No geomagnetic warnings in the last 3 days.</p>`) +
+      `<div class="foot">${wxFoot()}</div>`;
+  }},
+
+  bands: {name: "HF band guide", about: "Rough day/night conditions by band", render() {
+    if (!wx || !wx.data) return noWx();
+    if (!wx.data.bands.length) return `<p class="muted">Needs the solar flux figure.</p>`;
+    return `<table class="t"><tr><th>Bands</th><th>Day</th><th>Night</th></tr>` +
+      wx.data.bands.map(b => `<tr><td class="mono">${esc(b.band)}</td><td class="${b.day}">${b.day}</td><td class="${b.night}">${b.night}</td></tr>`).join("") +
+      `</table><div class="foot">A rough guide worked out from solar flux and Kp. It is not a prediction for any particular path.</div>`;
+  }},
+
+  radio: {name: "Radio", about: "Frequency and mode of the connected radio", render() {
+    const r = QD.state.radio;
+    if (r.freq == null) return `<p class="muted">Waiting for the radio...</p>`;
+    return `<div class="big" style="color:var(--amber)">${(r.freq / 1e6).toFixed(4)}<span style="font-size:18px;color:var(--dim)"> MHz</span></div>` +
+      `<div class="sub mono">${esc(r.band || "out of band")} ${esc(r.rmode || "")}  ·  ${!r.connected ? "no radio" : r.simulated ? "simulated radio" : esc(r.name)}</div>`;
+  }},
+
+  contest: {name: "Contest", about: "Score and time left in the period", fast: true, render() {
+    if (!app) return "";
+    const s = app.score; let h = `<div class="nums"><div class="num"><b style="color:var(--amber)">${s.total.toLocaleString()}</b><span>Score</span></div>` +
+      `<div class="num"><b>${s.count}</b><span>Contacts</span></div><div class="num"><b>${s.mults}</b><span>Mults</span></div></div>`;
+    if (app.contest.period_seconds) {
+      const len = app.contest.period_seconds, now = Date.now() / 1000, left = Math.ceil((Math.floor(now / len) + 1) * len - now);
+      h += `<div class="sub mono">Period ends in <b style="color:${left <= 120 ? "var(--red)" : "var(--text)"}">${Math.floor(left / 60)}:${pad(left % 60)}</b></div>`;
+    }
+    return h + `<div class="foot">${esc(app.event.name)}</div>`;
+  }},
+
+  recent: {name: "Recent contacts", about: "The last few contacts logged", wide: true, render() {
+    if (!app) return "";
+    const rows = app.qsos.filter(q => !q.deleted).slice(0, 8).map(q => {
+      const d = new Date(q.ts * 1000);
+      return `<tr class="mono"><td>${pad(d.getHours())}:${pad(d.getMinutes())}</td><td><b>${esc(q.call)}</b></td><td>${esc(q.band)}</td><td>${esc(q.mode)}</td><td>${esc([q.rst_rcvd, q.serial_rcvd, q.exch].filter(Boolean).join(" "))}</td></tr>`;
+    }).join("");
+    return rows ? `<table class="t"><tr><th>Time</th><th>Call</th><th>Band</th><th>Mode</th><th>Received</th></tr>${rows}</table>` : `<p class="muted">Nothing logged in this event yet.</p>`;
+  }},
+};
+
+/* ---------- drawing ---------- */
+function draw(only) {
+  const box = $("cards");
+  if (!only) {
+    box.innerHTML = layout.map((c, i) => `<div class="card ${c.wide ? "wide" : ""}" data-i="${i}">` +
+      `<div class="tools"><button data-a="left" title="Move earlier">←</button><button data-a="right" title="Move later">→</button>` +
+      `<button data-a="wide" title="Wide or normal">↔</button>` +
+      (TYPES[c.type].settings || TYPES[c.type].zones ? `<button data-a="cfg" title="Settings">⚙</button>` : "") +
+      `<button data-a="del" title="Remove">✕</button></div>` +
+      `<h3>${esc(c.cfg.title || TYPES[c.type].name)}</h3><div class="body"></div></div>`).join("");
+  }
+  box.querySelectorAll(".card").forEach(el => {
+    const c = layout[el.dataset.i], t = TYPES[c.type];
+    if (only === "fast" && !t.fast) return;
+    const html = t.render(c);
+    const body = el.querySelector(".body");
+    if (body.innerHTML !== html) body.innerHTML = html;
+  });
+}
+function norm(list) {
+  return (Array.isArray(list) ? list : []).filter(c => c && TYPES[c.type]).map(c => ({type: c.type, wide: c.wide == null ? !!TYPES[c.type].wide : !!c.wide, cfg: c.cfg || {}}));
+}
+async function save() { draw(); try { await api("/api/settings", {dashboard: JSON.stringify(layout)}); } catch (e) { $("hint").textContent = "Could not save the layout: " + e.message; } }
+
+/* ---------- customising ---------- */
+$("edit").onclick = () => {
+  editing = !editing;
+  document.body.classList.toggle("editing", editing);
+  $("edit").textContent = editing ? "Done" : "Customise"; $("edit").classList.toggle("primary", editing);
+  $("add").style.display = $("reset").style.display = editing ? "" : "none";
+  $("hint").textContent = editing ? "Move, widen, set up or remove cards. Changes are saved as you go and follow you to every device." : "";
+};
+$("cards").addEventListener("click", e => {
+  const b = e.target.closest(".tools button"); if (!b) return;
+  const i = Number(b.closest(".card").dataset.i), a = b.dataset.a;
+  if (a === "del") layout.splice(i, 1);
+  else if (a === "wide") layout[i].wide = !layout[i].wide;
+  else if (a === "left" && i > 0) [layout[i - 1], layout[i]] = [layout[i], layout[i - 1]];
+  else if (a === "right" && i < layout.length - 1) [layout[i + 1], layout[i]] = [layout[i], layout[i + 1]];
+  else if (a === "cfg") return openCfg(i);
+  save();
+});
+$("add").onclick = () => {
+  $("pick").innerHTML = Object.entries(TYPES).map(([k, t]) => `<button data-t="${k}">${esc(t.name)}<small>${esc(t.about)}</small></button>`).join("");
+  $("dlg-add").showModal();
+};
+$("pick").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  layout.push(norm([{type: b.dataset.t, cfg: b.dataset.t === "world" ? {zones: ["UTC"]} : {}}])[0]);
+  $("dlg-add").close(); save();
+});
+$("add-cancel").onclick = () => $("dlg-add").close();
+$("reset").onclick = () => { layout = norm(DEFAULT); save(); };
+
+let cfgIndex = -1;
+function openCfg(i) {
+  cfgIndex = i; const c = layout[i], t = TYPES[c.type];
+  $("cfg-title").textContent = t.name + " settings";
+  let h = `<label class="field">Card title (blank = "${esc(t.name)}")<input data-k="title" value="${esc(c.cfg.title || "")}"></label>`;
+  for (const [k, label] of t.settings || []) h += `<label class="field">${esc(label)}<input data-k="${k}" value="${esc(c.cfg[k] || "")}"></label>`;
+  if (t.zones) h += `<div class="field">Places to show</div><div class="chk">` +
+    ZONES.map(z => `<label><input type="checkbox" value="${z[1]}" ${(c.cfg.zones || []).includes(z[1]) ? "checked" : ""}> ${esc(z[0])}</label>`).join("") + `</div>`;
+  $("cfg-body").innerHTML = h; $("dlg-cfg").showModal();
+}
+$("cfg-cancel").onclick = () => $("dlg-cfg").close();
+$("cfg-save").onclick = () => {
+  const c = layout[cfgIndex];
+  $("cfg-body").querySelectorAll("input[data-k]").forEach(inp => { c.cfg[inp.dataset.k] = inp.value.trim(); });
+  if (TYPES[c.type].zones) c.cfg.zones = [...$("cfg-body").querySelectorAll("input[type=checkbox]:checked")].map(x => x.value);
+  $("dlg-cfg").close(); save();
+};
+
+/* ---------- data ---------- */
+async function loadWx() { try { wx = await api("/api/spaceweather"); draw("data"); } catch (e) { /* keep what we have */ } }
+QD.on("app", s => {
+  const first = !app; app = s;
+  if (first) { let saved = []; try { saved = JSON.parse(s.settings.dashboard || "[]"); } catch (e) {} layout = norm(saved.length ? saved : DEFAULT); draw(); }
+  else if (!editing) draw("data");
+});
+QD.on("radio", () => draw("data"));
+QD.on("log", async () => { try { app = await api("/api/state"); draw("data"); } catch (e) {} });
+setInterval(() => draw("fast"), 1000);
+loadWx(); setInterval(loadWx, 60000); setTimeout(loadWx, 6000);
+</script>
+</body>
+</html>
