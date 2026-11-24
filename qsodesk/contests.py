@@ -93,6 +93,19 @@ def is_vk_zl(call):
     return bool(re.match(r"^(VK|VI|VJ|VL|VM|VN|VH|AX|ZL|ZM)", prefix_of(call)))
 
 
+def is_zl(call):
+    return bool(re.match(r"^(ZL|ZM)", prefix_of(call)))
+
+
+_OCEANIA = re.compile(r"^(ZL|ZM|ZK|VK|VI|VJ|VL|VM|VN|VH|AX|P2|YJ|FK|FO|FW|3D2|5W|A3|C2|"
+                      r"T2|T3|E5|E6|H4|V6|V7|T8|KH)")
+
+
+def is_oceania(call):
+    """ZL, VK and the commoner Pacific prefixes. The list is not complete."""
+    return bool(_OCEANIA.match(prefix_of(call)))
+
+
 def norm_branch(text):
     t = (text or "").strip().upper()
     if t in ("HS", "H"):
@@ -111,6 +124,15 @@ class Contest:
     fields = ["name"]             # exchange fields after RST
     exch_label = ""
     has_serial = False
+    exch_required = "no"          # "always", "zl" (NZ stations only) or "no"
+    branch_exchange = False       # the exchange field holds an NZART branch number
+    exports = []                  # extra exports beyond ADIF
+    rules_url = ""
+    when = ""
+    submit = ""
+
+    def last_contact(self, qsos):
+        return max(qsos, key=lambda q: (q["ts"], q["id"])) if qsos else None
 
     def serial_scope(self, band, settings):
         return None               # None = no serial numbers
@@ -177,6 +199,8 @@ class Contest:
         return {"key": self.key, "name": self.name, "bands": self.bands,
                 "modes": self.modes, "fields": self.fields,
                 "exch_label": self.exch_label, "has_serial": self.has_serial,
+                "exch_required": self.exch_required, "exports": self.exports,
+                "rules_url": self.rules_url, "when": self.when, "submit": self.submit,
                 "period_seconds": self.period_seconds}
 
 
@@ -196,6 +220,12 @@ class JockWhite(Contest):
     fields = ["serial", "exch"]
     exch_label = "Branch"
     has_serial = True
+    exch_required = "always"
+    branch_exchange = True
+    exports = ["sheets", "summary"]
+    rules_url = "https://nzart.org.nz/activities/contests/jwfd/"
+    when = "Last full weekend of February: Saturday 1500-2400 and Sunday 0600-1500 NZDT"
+    submit = "Log sheets for each band plus the summary sheet, posted to the Contest Manager within four weeks."
     points = {"PH": 3, "CW": 5}
 
     def serial_scope(self, band, settings):
@@ -293,6 +323,10 @@ class TransTasman(Contest):
     modes = ["PH", "CW", "DIG"]
     fields = ["serial"]
     has_serial = True
+    exports = ["cabrillo", "summary"]
+    rules_url = "https://www.wia.org.au/members/contests/transtasman/"
+    when = "Saturday of the third full weekend of July, 0800-1400 UTC"
+    submit = "Cabrillo log uploaded at vklogchecker.com within a week."
 
     def serial_scope(self, band, settings):
         return band if settings.get("tt_serial_per_band") == "1" else ""
@@ -368,7 +402,254 @@ class TransTasman(Contest):
                 "count": len(seen), "lines": lines, "marks": marks}
 
 
-CONTESTS = {c.key: c() for c in (JockWhite, TransTasman, Contest)}
+class SangsterShield(Contest):
+    """NZART Sangster Shield: 80 m CW, QRP. Six half-hour periods, each station
+    once per period. NZ-NZ 5 points, NZ-overseas 10. Multiplier: each different
+    NZART branch worked (not your own). Score = points x branches."""
+    key = "sangster"
+    name = "Sangster Shield"
+    period_seconds = 1800
+    bands = ["80m"]
+    modes = ["CW"]
+    fields = ["serial", "exch"]
+    exch_label = "Branch"
+    has_serial = True
+    exch_required = "zl"
+    branch_exchange = True
+    exports = ["sheets", "summary", "cabrillo"]
+    rules_url = "https://nzart.org.nz/activities/contests/sangster-shield/"
+    when = "Third Saturday of May, 0800-1100 UTC (2000-2300 NZST)"
+    submit = ("Log and summary sheet to sangster@nzart.org.nz (text, Cabrillo, Word or Excel) "
+              "by the fourth Saturday after the contest.")
+
+    def serial_scope(self, band, settings):
+        return ""
+
+    def _mult_ok(self, branch, settings):
+        return bool(branch) and branch != norm_branch(settings.get("branch", ""))
+
+    def _walk(self, qsos, settings):
+        seen, mults, marks, points = set(), set(), {}, 0
+        nz = dx = 0
+        for q in sorted(qsos, key=lambda q: (q["ts"], q["id"])):
+            slot = (base_call(q["call"]), self.period_key(q["ts"]))
+            mark = {"pts": 0, "mult": False, "dupe": False}
+            if slot in seen or q["band"] not in self.bands or q["mode"] != "CW":
+                mark["dupe"] = slot in seen
+            else:
+                seen.add(slot)
+                home = is_zl(q["call"])
+                mark["pts"] = 5 if home else 10
+                points += mark["pts"]
+                nz, dx = nz + (1 if home else 0), dx + (0 if home else 1)
+                br = norm_branch(q.get("exch"))
+                if home and self._mult_ok(br, settings) and br not in mults:
+                    mults.add(br)
+                    mark["mult"] = True
+            marks[q["id"]] = mark
+        return seen, mults, marks, points, nz, dx
+
+    def is_new_mult(self, qsos, branch, band, mode, settings):
+        br = norm_branch(branch)
+        return self._mult_ok(br, settings) and br not in self._walk(qsos, settings)[1]
+
+    def check(self, qsos, call, band, mode, ts, settings):
+        call = base_call(call)
+        out = {"status": "ok", "msg": "", "exch": "", "name": ""}
+        if not call:
+            return out
+        last = self.history(qsos, call)
+        if last:
+            out["exch"] = norm_branch(last.get("exch"))
+            out["msg"] = "Worked before - branch %s" % (out["exch"] or "?")
+        if band not in self.bands or mode != "CW":
+            return dict(out, status="invalid", msg="The Sangster Shield is 80 m CW only")
+        pk = self.period_key(ts)
+        if any(base_call(q["call"]) == call and self.period_key(q["ts"]) == pk for q in qsos):
+            return dict(out, status="dupe", msg="Already worked this half hour")
+        prev = self.last_contact(qsos)
+        if prev and base_call(prev["call"]) == call and ts - prev["ts"] < 300:
+            wait = int((300 - (ts - prev["ts"])) // 60) + 1
+            return dict(out, status="invalid",
+                        msg="Twice running - work another station first, or wait %d min" % wait)
+        if out["exch"] and self.is_new_mult(qsos, out["exch"], band, mode, settings):
+            out.update(status="mult", msg="New multiplier - branch %s" % out["exch"])
+        elif not last:
+            out.update(status="new", msg="New station")
+        return out
+
+    def score(self, qsos, settings):
+        seen, mults, marks, points, nz, dx = self._walk(qsos, settings)
+        lines = [{"label": "NZ stations", "count": nz, "points": nz * 5, "mults": len(mults)},
+                 {"label": "Overseas", "count": dx, "points": dx * 10, "mults": 0}]
+        return {"total": points * len(mults), "points": points, "mults": len(mults),
+                "count": len(seen), "lines": lines, "marks": marks}
+
+
+class Memorial(Contest):
+    """NZART Memorial Contest: 80 m, SSB and CW. Three one-hour periods; a
+    station may be worked once on each mode per period, not consecutively.
+    SSB 1 point, CW 2. Multiplier: each ZL/VK/Oceania prefix, per mode.
+    Score = points x multipliers (SSB and CW multipliers added together)."""
+    key = "memorial"
+    name = "NZART Memorial Contest"
+    period_seconds = 3600
+    bands = ["80m"]
+    modes = ["PH", "CW"]
+    fields = ["serial"]
+    has_serial = True
+    exports = ["cabrillo", "summary"]
+    rules_url = "https://nzart.org.nz/activities/contests/memorial-contest/"
+    when = "First Saturday of July, 0800-1100 UTC (2000-2300 NZST)"
+    submit = "Cabrillo log emailed to contests@nzart.org.nz, to arrive by 31 July."
+    points = {"PH": 1, "CW": 2}
+
+    def serial_scope(self, band, settings):
+        return ""
+
+    def _walk(self, qsos):
+        seen, mults, marks, lines = set(), set(), {}, {}
+        for q in sorted(qsos, key=lambda q: (q["ts"], q["id"])):
+            slot = (base_call(q["call"]), q["mode"], self.period_key(q["ts"]))
+            mark = {"pts": 0, "mult": False, "dupe": False}
+            if slot in seen or q["band"] not in self.bands or q["mode"] not in self.modes:
+                mark["dupe"] = slot in seen
+            else:
+                seen.add(slot)
+                mark["pts"] = self.points[q["mode"]]
+                mk = (prefix_of(q["call"]), q["mode"])
+                if is_oceania(q["call"]) and mk not in mults:
+                    mults.add(mk)
+                    mark["mult"] = True
+                ln = lines.setdefault(q["mode"], [0, 0, 0])
+                ln[0] += 1
+                ln[1] += mark["pts"]
+                ln[2] += 1 if mark["mult"] else 0
+            marks[q["id"]] = mark
+        return seen, mults, marks, lines
+
+    def check(self, qsos, call, band, mode, ts, settings):
+        full = call
+        call = base_call(call)
+        out = {"status": "ok", "msg": "", "exch": "", "name": ""}
+        if not call:
+            return out
+        last = self.history(qsos, call)
+        if last:
+            out["msg"] = "Worked before"
+        if band not in self.bands or mode not in self.modes:
+            return dict(out, status="invalid", msg="The Memorial Contest is 80 m, SSB or CW")
+        pk = self.period_key(ts)
+        if any(self.same_slot(q, call, band, mode, pk) for q in qsos):
+            return dict(out, status="dupe", msg="Already worked this hour on %s" % mode)
+        prev = self.last_contact(qsos)
+        if prev and base_call(prev["call"]) == call and self.period_key(prev["ts"]) == pk:
+            return dict(out, status="invalid",
+                        msg="Not straight after their %s contact - work another station first" % prev["mode"])
+        mults = self._walk(qsos)[1]
+        if len(call) >= 4 and is_oceania(full) and (prefix_of(full), mode) not in mults:
+            out.update(status="mult", msg="New multiplier - %s on %s" % (prefix_of(full), mode))
+        elif not last:
+            out.update(status="new", msg="New station")
+        return out
+
+    def score(self, qsos, settings):
+        seen, mults, marks, lines = self._walk(qsos)
+        points = sum(v[1] for v in lines.values())
+        out = [{"label": m, "count": lines.get(m, [0, 0, 0])[0], "points": lines.get(m, [0, 0, 0])[1],
+                "mults": lines.get(m, [0, 0, 0])[2]} for m in self.modes]
+        return {"total": points * len(mults), "points": points, "mults": len(mults),
+                "count": len(seen), "lines": out, "marks": marks}
+
+
+class Sprint(Contest):
+    """ZL Autumn and Winter Sprints: 80 m, half an hour each of CW, SSB and
+    FT4. Exchange is RS(T) and the outside temperature (grid square on FT4).
+    Each station once per mode. One point per contact, no multipliers."""
+    key = "sprint"
+    name = "ZL Sprint (Autumn / Winter)"
+    bands = ["80m"]
+    modes = ["CW", "PH", "DIG"]
+    fields = ["exch"]
+    exch_label = "Temp / grid"
+    exch_required = "always"
+    exports = ["cabrillo", "summary"]
+    rules_url = "https://nzart.org.nz/activities/contests/sprints/"
+    when = "Tuesdays in April and August: CW 0800, SSB 0830, FT4 0900 UTC, half an hour each"
+    submit = "Log emailed to the organiser within 24 hours, with your claimed score and branch number."
+
+    def _walk(self, qsos):
+        seen, marks, lines = set(), {}, {}
+        for q in sorted(qsos, key=lambda q: (q["ts"], q["id"])):
+            slot = (base_call(q["call"]), q["mode"])
+            mark = {"pts": 0, "mult": False, "dupe": False}
+            if slot in seen or q["band"] not in self.bands:
+                mark["dupe"] = slot in seen
+            else:
+                seen.add(slot)
+                mark["pts"] = 1
+                lines[q["mode"]] = lines.get(q["mode"], 0) + 1
+            marks[q["id"]] = mark
+        return seen, marks, lines
+
+    def check(self, qsos, call, band, mode, ts, settings):
+        call = base_call(call)
+        out = {"status": "ok", "msg": "", "exch": "", "name": ""}
+        if not call:
+            return out
+        if band not in self.bands:
+            return dict(out, status="invalid", msg="The Sprints are on 80 m")
+        if any(base_call(q["call"]) == call and q["mode"] == mode for q in qsos):
+            return dict(out, status="dupe", msg="Already worked on %s tonight" % mode)
+        if any(base_call(q["call"]) == call for q in qsos):
+            out["msg"] = "Worked on another mode tonight"
+        else:
+            out.update(status="new", msg="New station")
+        return out
+
+    def score(self, qsos, settings):
+        seen, marks, lines = self._walk(qsos)
+        names = {"CW": "CW", "PH": "SSB", "DIG": "FT4"}
+        out = [{"label": names[m], "count": lines.get(m, 0), "points": lines.get(m, 0), "mults": 0}
+               for m in self.modes]
+        return {"total": len(seen), "points": len(seen), "mults": 0, "count": len(seen),
+                "lines": out, "marks": marks}
+
+
+CONTESTS = {c.key: c() for c in (JockWhite, SangsterShield, Memorial, Sprint, TransTasman, Contest)}
+
+# The NZART contest calendar, with where to find the rules. "key" is set for
+# contests QSODesk scores; the rest can be logged as General logging.
+_N = "https://nzart.org.nz/activities/contests/"
+CATALOGUE = [
+    {"name": "NZART Portable Activity Day", "key": "", "when": "1 January (an activity day, not a contest)",
+     "url": _N + "nzart-portable-activity-day/"},
+    {"name": "NZART Jock White Memorial Field Day", "key": "jwfd", "url": _N + "jwfd/"},
+    {"name": "Commonwealth Contest", "key": "", "when": "March (14-15 March in 2026)",
+     "url": _N + "commonwealth-contest/"},
+    {"name": "NZART Autumn and Winter Sprints", "key": "sprint", "url": _N + "sprints/"},
+    {"name": "NZART Sangster Shield", "key": "sangster", "url": _N + "sangster-shield/"},
+    {"name": "NZART Memorial Contest", "key": "memorial", "url": _N + "memorial-contest/"},
+    {"name": "Trans-Tasman Low-Band Contest (WIA)", "key": "tt",
+     "url": "https://www.wia.org.au/members/contests/transtasman/"},
+    {"name": "VHF/UHF Contests", "key": "", "when": "Several through the year; see the calendar",
+     "url": _N + "vhf/"},
+    {"name": "H-Night Contest", "key": "", "when": "December (8 December in 2026)",
+     "url": _N + "h-night-contest/"},
+    {"name": "Straight Key Night", "key": "", "when": "Winter and summer (14 June and 6 December in 2026)",
+     "url": "https://zl1.nz/new-zealand-straight-key-night/"},
+]
+CALENDAR_URL = _N + "nzart-contest-calendar/"
+
+
+def catalogue():
+    out = []
+    for c in CATALOGUE:
+        row = dict(c)
+        if c["key"]:
+            row["when"] = CONTESTS[c["key"]].when
+        out.append(row)
+    return out
 
 
 def get(key):

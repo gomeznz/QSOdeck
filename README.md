@@ -3,8 +3,7 @@
 A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
-**Version 0.4.** The logger (fast entry line, Jock White Field Day and
-Trans-Tasman rules, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
+**Version 0.5.** The logger (fast entry line, five ZL/VK contests, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
 **dashboard** and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
@@ -139,6 +138,48 @@ setting.
 The keypad must be plugged into the computer whose browser you are logging
 on. Tested with simulated key presses; not yet tried with a physical keypad.
 
+## Contests and reports
+
+QSODesk scores these contests, each with its own entry line, dupe checking
+and score. Start one with **New event** on the Logger; the dialog shows when
+the contest runs and links to its rules, and a **Rules** link stays beside the
+event name while you log.
+
+| Contest | Exchange | Notes |
+|---|---|---|
+| Jock White Field Day | RS(T), serial, branch | hourly periods, per band and mode |
+| Sangster Shield | RST, serial, branch | 80 m CW, half-hour periods, warns on "twice running" |
+| NZART Memorial Contest | RS(T), serial | 80 m, SSB and CW, hourly periods, warns on consecutive contacts |
+| ZL Sprints | RS(T), temperature or grid | 80 m, once per mode |
+| Trans-Tasman Low-Band | RS(T), serial | two-hour blocks |
+
+The **Reports** page gives:
+
+- **A contest report** for any event: claimed score, breakdown, contacts per
+  period, band and mode split, operators and stations, every multiplier
+  claimed, the export files, the rules link and how the log is sent in.
+- **A personal report** for everyday contacts (all "General logging" events,
+  or the whole log): totals, contacts by month, bands, modes, ZL and VK call
+  areas, most-worked stations, prefixes and the latest contacts, for all
+  years or one.
+- **Callsign look-up:** every contact with a station, across all events.
+- **The NZART contest list** with a rules link for each, including those
+  QSODesk does not score yet (log those as General logging).
+
+"Print / save as PDF" gives a clean black-on-white copy.
+
+Things to check before relying on the new scores:
+
+- **Memorial Contest:** the rules do not say exactly how the SSB and CW
+  multipliers combine. QSODesk multiplies total points by SSB multipliers
+  plus CW multipliers. Its list of Oceania prefixes is also incomplete.
+- **Sangster Shield:** scored from a New Zealand entrant's point of view.
+- **Sprints:** your own temperature is not recorded, so it is missing from
+  the "sent" side of the exports.
+- **Cabrillo** contest names for these are placeholders; check with the
+  contest manager.
+- "Prefixes" in the personal report are callsign prefixes, not DXCC countries.
+
 ## Dashboard
 
 A page of cards for a shack monitor or the club tent: callsign, local time,
@@ -214,6 +255,7 @@ What has and has not been tested:
     qsodesk/store.py        database, journal, backup, recovery
     qsodesk/radio.py        simulated radio and Hamlib (rigctld) control
     qsodesk/audio.py        audio from the radio, and the audio simulator
+    qsodesk/reports.py      contest and personal reports
     qsodesk/ft8.py          FT8 timing, sequencing and logging
     qsodesk/spaceweather.py NOAA space weather for the dashboard
     qsodesk/server.py       web server and exports

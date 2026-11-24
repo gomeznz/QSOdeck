@@ -292,6 +292,14 @@ class Store:
             sql += " AND deleted=0"
         return [dict(r) for r in self.db.execute(sql + " ORDER BY ts, id", (event,))]
 
+    def all_qsos(self, contest=None):
+        """Every live contact, optionally only those logged under one contest type."""
+        sql, args = "SELECT * FROM qsos WHERE deleted=0", []
+        if contest:
+            sql += " AND contest=?"
+            args.append(contest)
+        return [dict(r) for r in self.db.execute(sql + " ORDER BY ts, id", args)]
+
     def get(self, uuid):
         row = self.db.execute("SELECT * FROM qsos WHERE uuid=?", (uuid,)).fetchone()
         return dict(row) if row else None
