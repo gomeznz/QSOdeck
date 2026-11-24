@@ -114,6 +114,46 @@ class FT8Messages(unittest.TestCase):
         self.assertEqual(len(s), dot * (1 + 1 + 2 + 4) + dot * (3 + 1 + 2 + 4))
 
 
+class SpaceWx(unittest.TestCase):
+    RAW = {
+        "kp": [["time_tag", "Kp", "a_running", "station_count"],
+               ["2026-11-24 03:00:00.000", "2.33", "9", "8"], ["2026-11-24 06:00:00.000", "5.00", "48", "8"]],
+        "flux": {"Flux": "142", "TimeStamp": "2026-11-23 20:00:00"},
+        "wind": {"WindSpeed": "510", "TimeStamp": "x"}, "mag": {"Bt": "9", "Bz": "-6", "TimeStamp": "x"},
+        "scales": {"0": {"DateStamp": "2026-11-24", "R": {"Scale": "1", "Text": "minor"},
+                         "S": {"Scale": "0", "Text": "none"}, "G": {"Scale": "1", "Text": "minor"}},
+                   "1": {"DateStamp": "2026-11-25", "R": {"Scale": None, "MinorProb": "40", "MajorProb": "10"},
+                         "S": {"Scale": None, "Prob": "5"}, "G": {"Scale": "2", "Text": "moderate"}}},
+        "alerts": [
+            {"product_id": "K05W", "issue_datetime": "2026-11-24 05:12:33.000",
+             "message": "Space Weather Message Code: WARK05\r\nSerial Number: 1\r\n\r\n"
+                        "WARNING: Geomagnetic K-index of 5 expected\r\nValid From: ..."},
+            {"product_id": "XM5A", "issue_datetime": "2026-11-24 04:00:00.000",
+             "message": "ALERT: X-Ray Flux exceeded M5\r\n"},
+            {"product_id": "K04W", "issue_datetime": "2026-10-01 05:00:00.000",
+             "message": "WARNING: Geomagnetic K-index of 4 expected\r\n"}],
+    }
+
+    def test_build(self):
+        import calendar
+        from qsodesk import spaceweather as sw
+        now = calendar.timegm((2026, 11, 24, 8, 0, 0))
+        d = sw.build(self.RAW, now)
+        self.assertEqual((d["sfi"], d["kp"], d["a"], d["wind"], d["bz"]), (142, 5, 48, 510, -6))
+        self.assertEqual(d["kp_word"], "Minor storm (G1)")
+        self.assertEqual(d["scales"]["now"]["G"], 1)
+        self.assertEqual(d["scales"]["forecast"][0]["G"], 2)
+        self.assertEqual(len(d["alerts"]), 1)                 # X-ray and old ones left out
+        self.assertEqual(d["alerts"][0]["text"], "Geomagnetic K-index of 5 expected")
+        self.assertEqual(d["bands"][0], {"band": "80 m - 40 m", "day": "Poor", "night": "Fair"})
+
+    def test_other_layout(self):
+        from qsodesk import spaceweather as sw
+        kp = sw.parse_kp([{"time_tag": "2026-11-24T06:00:00", "kp_index": 3}])
+        self.assertEqual(kp[0]["kp"], 3)
+        self.assertEqual(sw.build({})["kp"], None)            # nothing fetched: no crash
+
+
 class Storage(unittest.TestCase):
     def entry(self, n, band="80m"):
         return {"uuid": "u%d" % n, "event": "Practice - Jock White", "contest": "jwfd",
