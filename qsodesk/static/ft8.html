@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - FT8</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+.slotbar{height:10px;background:var(--line);border-radius:5px;overflow:hidden;flex:1;min-width:160px}
+.slotbar i{display:block;height:100%;background:var(--green)}
+.slotbar.tx i{background:var(--red)}
+.btns button{padding:5px 9px;font-family:var(--mono);font-size:13px}
+table.act{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:14px}
+table.act th{text-align:left;color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.8px;padding:5px 8px;border-bottom:1px solid var(--line)}
+table.act td{padding:4px 8px;white-space:nowrap}
+table.act tr.d{cursor:pointer}
+table.act tr.d:hover{background:var(--panel2)}
+table.act tr.sep td{color:var(--dim);font-size:11px;background:#111821;letter-spacing:1px;padding:3px 8px}
+table.act tr.cq td.m{color:var(--green);font-weight:600}
+table.act tr.mine td{background:rgba(255,178,36,.16);color:var(--amber);font-weight:700}
+table.act tr.worked td.m{color:var(--dim)}
+table.act tr.tx td{color:var(--red);font-weight:600}
+.pill{font-size:11px;border-radius:5px;padding:1px 6px;margin-left:6px;background:rgba(92,179,255,.18);color:var(--blue)}
+.pill.w{background:var(--panel2);color:var(--dim)}
+.box{max-height:430px;overflow-y:auto}
+.qso{font-family:var(--mono)}
+.qso .dx{font-size:26px;font-weight:800;color:var(--amber)}
+.qso .next{background:#0b1016;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;font-size:16px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px}
+.kv span{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="panel">
+    <div class="row">
+      <span class="tag" id="engine">--</span>
+      <span class="tag" id="txstate">RECEIVING</span>
+      <span class="muted" id="slotlabel"></span>
+      <div class="slotbar" id="slotbar"><i id="slotfill" style="width:0"></i></div>
+      <span class="btns" id="bands"></span>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="grid2">
+    <div>
+      <div class="panel">
+        <div id="wf"></div>
+        <p class="muted" style="margin:6px 0 0">Shift-click the waterfall to move your transmit frequency (red marker).</p>
+      </div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:6px"><h3 style="margin:0">Band activity</h3><span class="muted">click a station to call it</span></div>
+        <div class="box"><table class="act"><thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Message</th></tr></thead><tbody id="act"></tbody></table></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel qso">
+        <h3>Your QSO</h3>
+        <div id="qso"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" id="cq">Call CQ</button>
+          <button class="stop" id="halt">Halt transmit</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Station</h3>
+        <div class="kv" id="station"></div>
+        <p class="muted" id="simnote"></p>
+        <p class="muted">FT8 needs the clock right to within about a second. The Pi keeps time from the internet; in the field, use a GPS or set it from a phone first.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/qd.js"></script>
+<script>
+"use strict";
+const {$, api, esc, pad} = QD;
+QD.header("ft8");
+let F = null;
+
+const spec = new QD.Spectrum(2048, 1200);
+const wf = new QD.Waterfall($("wf"), {fmin: 100, fmax: 3000, height: 200});
+spec.on((db, hz) => wf.row(db, hz));
+const feed = new QD.AudioFeed(); feed.on(s => spec.push(s)); feed.start();
+wf.onclick = (f, e) => { if (e.shiftKey) api("/api/ft8/txfreq", {freq: Math.round(f)}); };
+
+const hms = t => { const d = new Date(t * 1000); return pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + pad(d.getUTCSeconds()); };
+
+async function refresh() {
+  try { F = await api("/api/ft8"); } catch (e) { return; }
+  const eng = $("engine");
+  eng.textContent = F.engine === "simulated" ? "SIMULATED BAND" : F.engine === "ft8_lib" ? "DECODER READY" : "DECODER NOT INSTALLED";
+  eng.className = "tag " + (F.engine === "simulated" ? "sim" : F.engine === "ft8_lib" ? "live" : "bad");
+  $("note").textContent = (!F.active ? "The radio is not in a data mode, so FT8 is paused. Pick a band to start. " : "") + (F.note || "");
+  $("simnote").textContent = F.engine === "simulated"
+    ? "Simulated band: these stations are pretend and their messages are scripted, so you can practise a full QSO. Real decoding needs the radio's audio and the FT8 decoder installed."
+    : "";
+  const r = QD.state.radio;
+  $("bands").innerHTML = F.freqs.map(b => `<button data-f="${b[1]}" class="${r.freq === b[1] && r.mode === "DIG" ? "on" : ""}">${b[0]}</button>`).join("");
+  wf.setMarks([{f: F.tx_freq, width: 50, color: "#ff5f5f"}, {f: F.tx_freq, label: "TX " + F.tx_freq, color: "#ff5f5f"}]);
+  $("station").innerHTML = `<span>Callsign</span><b>${esc(F.mycall || "not set")}</b><span>Grid</span><b>${esc(F.grid || "not set")}</b>` +
+    `<span>TX audio</span><b>${F.tx_freq} Hz</b><span>Logging to</span><b>${esc(QD.state.app ? QD.state.app.event.name : "")}</b>`;
+
+  // QSO panel
+  const q = F.qso;
+  $("qso").innerHTML = q
+    ? `<div class="dx">${esc(q.dx || "CQ")}</div>` +
+      `<div class="next">${F.tx_enabled ? "Sending" : "Stopped"}: <b>${esc(q.tx)}</b></div>` +
+      `<div class="kv"><span>Report sent</span><b>${esc(q.sent || "-")}</b><span>Report received</span><b>${esc(q.rcvd || "-")}</b>` +
+      `<span>Their grid</span><b>${esc(q.grid || "-")}</b><span>Calls without reply</span><b>${q.tries}</b></div>`
+    : `<p class="muted" style="font-family:inherit">No QSO in progress. Click a station calling CQ, or call CQ yourself. QSODesk works through the exchange and logs the contact at the end.</p>`;
+  $("txstate").textContent = F.transmitting ? "TRANSMITTING" : F.tx_enabled ? "TX ARMED" : "RECEIVING";
+  $("txstate").className = "tag " + (F.transmitting ? "tx" : F.tx_enabled ? "bad" : "live");
+  $("slotbar").className = "slotbar" + (F.transmitting ? " tx" : "");
+
+  // band activity, newest period first
+  let h = "";
+  for (const s of F.slots.slice().reverse()) {
+    h += `<tr class="sep"><td colspan="5">${hms(s.t)}  ${s.slot % 2 ? "odd" : "even"}</td></tr>`;
+    if (s.tx) h += `<tr class="tx"><td>${hms(s.t)}</td><td>TX</td><td></td><td>${F.tx_freq}</td><td>${esc(s.tx)}</td></tr>`;
+    for (const d of s.decodes) {
+      const cls = d.mine ? "mine" : d.cq ? "cq" : "";
+      h += `<tr class="d ${cls} ${d.worked ? "worked" : ""}" data-call="${esc(d.de)}" data-snr="${d.snr}" data-slot="${s.slot}" data-grid="${esc(d.grid || "")}">` +
+        `<td>${hms(s.t)}</td><td>${d.snr}</td><td>${d.dt.toFixed(1)}</td><td>${d.freq}</td>` +
+        `<td class="m">${esc(d.msg)}${d.vkzl ? '<span class="pill">VK/ZL</span>' : ""}${d.worked ? '<span class="pill w">worked</span>' : ""}</td></tr>`;
+    }
+    if (!s.tx && !s.decodes.length) h += `<tr><td colspan="5" class="muted" style="font-family:inherit">nothing decoded</td></tr>`;
+  }
+  $("act").innerHTML = h || `<tr><td colspan="5" class="muted" style="font-family:inherit;padding:14px 8px">Waiting for the end of the first 15-second period...</td></tr>`;
+}
+
+$("act").addEventListener("click", async e => {
+  const tr = e.target.closest("tr.d"); if (!tr || !tr.dataset.call) return;
+  try { await api("/api/ft8/call", {call: tr.dataset.call, snr: Number(tr.dataset.snr), slot: Number(tr.dataset.slot), grid: tr.dataset.grid}); refresh(); }
+  catch (err) { $("note").textContent = err.message; }
+});
+$("cq").onclick = async () => { try { await api("/api/ft8/cq", {}); } catch (err) { $("note").textContent = err.message; } };
+$("halt").onclick = () => api("/api/ft8/halt", {});
+$("bands").addEventListener("click", e => { const f = e.target.dataset.f; if (f) api("/api/radio", {freq: Number(f), rmode: "PKTUSB"}); });
+
+QD.on("ft8", refresh); QD.on("radio", refresh); QD.on("app", refresh);
+setInterval(() => {
+  const now = Date.now() / 1000, into = now % 15;
+  $("slotfill").style.width = (into / 15 * 100).toFixed(1) + "%";
+  $("slotlabel").textContent = (Math.floor(now / 15) % 2 ? "odd" : "even") + " period, " + Math.floor(15 - into) + " s left";
+}, 250);
+refresh();
+</script>
+</body>
+</html>

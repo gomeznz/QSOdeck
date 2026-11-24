@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0d1218; --panel:#151c25; --panel2:#1b2430; --line:#263242;
+  --text:#e8edf3; --dim:#8494a8; --amber:#ffb224; --green:#3ddc84;
+  --red:#ff5f5f; --blue:#5cb3ff; --violet:#c58cff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--dim)}
+button.on{background:var(--amber);border-color:var(--amber);color:#1a1200;font-weight:600}
+button.primary{background:var(--amber);border-color:var(--amber);color:#1a1200;font-weight:700}
+input,select{background:#0b1016;border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.wrap{max-width:1320px;margin:0 auto;padding:14px 16px 40px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.logo{font-weight:800;font-size:22px;letter-spacing:.5px}
+.logo span{color:var(--amber)}
+.topnav{display:flex;gap:4px}
+.topnav a{color:var(--dim);text-decoration:none;padding:6px 12px;border-radius:8px;font-weight:600}
+.topnav a:hover{color:var(--text);background:var(--panel2)}
+.topnav a.on{color:#1a1200;background:var(--amber)}
+.me{font-family:var(--mono);font-weight:700;color:var(--amber);font-size:17px}
+header select{max-width:260px}
+.spacer{flex:1}
+.clock{font-family:var(--mono);text-align:right;line-height:1.2}
+.clock small{display:block;color:var(--dim);font-size:12px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:14px}
+@media(max-width:940px){.grid{grid-template-columns:1fr}}
+main{min-width:0}
+@media(max-width:640px){
+  .wrap{padding:10px 10px 30px} .freq{font-size:32px}
+  .entry .fld{flex:1 1 40%} .entry .fld:first-child{flex-basis:100%}
+  #call,#srx,#exch,#name,.fld.rst input{width:100%}
+  .sendbox{flex:1 1 40%} #logbtn{flex:1 1 100%} #saved{margin-left:0}
+}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.panel h3{margin:0 0 8px;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-weight:600}
+
+/* radio */
+.radio{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.freq{font-family:var(--mono);font-size:40px;font-weight:700;color:var(--amber);letter-spacing:1px;line-height:1}
+.freq small{font-size:16px;color:var(--dim);font-weight:400;margin-left:6px}
+.tags{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:13px;padding:3px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line)}
+.tag.sim{color:var(--violet);border-color:var(--violet)}
+.tag.live{color:var(--green);border-color:var(--green)}
+.tag.bad{color:var(--red);border-color:var(--red)}
+.smeter{display:flex;gap:3px;align-items:flex-end;height:22px}
+.smeter i{width:7px;background:var(--line);border-radius:2px}
+.smeter i.lit{background:var(--green)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.btns button{padding:5px 10px;font-family:var(--mono);font-size:13px}
+.note{color:var(--amber);font-size:13px;margin-top:8px}
+
+/* entry line */
+.entry{margin-top:14px;border:2px solid var(--line);border-radius:14px;padding:14px;background:var(--panel);transition:border-color .08s,box-shadow .08s}
+.entry[data-status=ok],.entry[data-status=new]{border-color:var(--green)}
+.entry[data-status=mult]{border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,178,36,.18)}
+.entry[data-status=dupe]{border-color:var(--red);box-shadow:0 0 0 3px rgba(255,95,95,.2)}
+.entry[data-status=invalid]{border-color:var(--violet)}
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.fld{display:flex;flex-direction:column;gap:4px}
+.fld span{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+.fld input{font-family:var(--mono);font-size:26px;font-weight:700;text-transform:uppercase;padding:8px 12px}
+#call{width:240px}
+#srx{width:120px} #exch{width:110px} #name{width:200px;text-transform:none;font-size:20px}
+.fld.rst input{width:86px;font-size:18px;color:var(--dim)}
+.sendbox{background:#0b1016;border:1px dashed var(--line);border-radius:10px;padding:4px 14px 6px;text-align:center}
+.sendbox span{display:block;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+.sendbox b{font-family:var(--mono);font-size:30px;color:var(--amber);letter-spacing:2px}
+.sendbox em{font-style:normal;font-family:var(--mono);color:var(--dim);font-size:18px;margin-left:8px}
+#logbtn{font-size:18px;padding:12px 20px}
+.statusline{display:flex;gap:12px;align-items:center;margin-top:10px;min-height:24px;flex-wrap:wrap}
+#msg{font-weight:600}
+.entry[data-status=dupe] #msg{color:var(--red)}
+.entry[data-status=mult] #msg{color:var(--amber)}
+.entry[data-status=invalid] #msg{color:var(--violet)}
+.entry[data-status=new] #msg,.entry[data-status=ok] #msg{color:var(--green)}
+#saved{margin-left:auto;font-size:13px;color:var(--dim);font-family:var(--mono)}
+#saved.good{color:var(--green)} #saved.warn{color:var(--amber)} #saved.bad{color:var(--red)}
+.keys{color:var(--dim);font-size:12px;margin-top:6px}
+kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+
+/* sidebar */
+.side{display:flex;flex-direction:column;gap:14px}
+.big{font-family:var(--mono);font-size:38px;font-weight:800;color:var(--amber);line-height:1}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+.stat b{display:block;font-family:var(--mono);font-size:20px}
+.stat span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+.count{font-family:var(--mono);font-size:34px;font-weight:700;line-height:1}
+.count.soon{color:var(--red)}
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--amber)}
+.breakdown{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+.breakdown td,.breakdown th{padding:3px 4px;text-align:right;font-family:var(--mono)}
+.breakdown th{color:var(--dim);font-weight:400;font-size:11px}
+.breakdown td:first-child,.breakdown th:first-child{text-align:left}
+.avail{display:flex;flex-wrap:wrap;gap:6px}
+.avail button{font-family:var(--mono);font-size:13px;padding:4px 8px}
+.avail button small{color:var(--dim)}
+.muted{color:var(--dim);font-size:13px}
+
+/* log */
+.logwrap{margin-top:14px}
+.loghead{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.loghead a{color:var(--blue);font-size:13px;text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+table.log{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:14px}
+table.log th{text-align:left;color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.8px;padding:6px 8px;border-bottom:1px solid var(--line)}
+table.log td{padding:6px 8px;border-bottom:1px solid #1c2531;white-space:nowrap}
+table.log tr.q{cursor:pointer}
+table.log tr.q:hover{background:var(--panel2)}
+table.log tr.del td{text-decoration:line-through;color:var(--dim)}
+table.log tr.sep td{padding:3px 8px;color:var(--dim);font-size:11px;background:#111821;letter-spacing:1px}
+.c-call{font-weight:700;color:var(--text)}
+.pill{font-size:11px;border-radius:5px;padding:1px 6px;margin-left:4px}
+.pill.mult{background:rgba(255,178,36,.18);color:var(--amber)}
+.pill.dupe{background:rgba(255,95,95,.18);color:var(--red)}
+.tablebox{overflow-x:auto}
+
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(560px,94vw)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog h2{margin:0 0 12px;font-size:18px}
+.form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.form input,.form select{width:100%}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+.form label.wide{grid-column:1/3}
+.form input,.form select{color:var(--text)}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.actions .left{margin-right:auto}
+.danger{color:var(--red)}
+#banner{display:none;background:rgba(61,220,132,.12);border:1px solid var(--green);color:var(--green);border-radius:10px;padding:8px 12px;margin-bottom:12px}
+#offline{display:none;background:rgba(255,95,95,.12);border:1px solid var(--red);color:var(--red);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">QSO<span>Desk</span></div>
+    <nav class="topnav"><a class="on" href="/">Logger</a><a href="/waterfall">Waterfall</a><a href="/cw">CW</a><a href="/ft8">FT8</a></nav>
+    <div class="me" id="me"></div>
+    <select id="eventsel" title="Event"></select>
+    <button id="newevent">New event</button>
+    <div class="spacer"></div>
+    <button id="opensettings">Settings</button>
+    <div class="clock"><span id="clock">--:--:--</span><small id="utc"></small></div>
+  </header>
+  <div id="banner"></div>
+  <div id="offline"></div>
+
+  <div class="grid">
+    <main>
+      <div class="panel">
+        <div class="radio">
+          <div class="freq" id="freq">-.---.-<small>MHz</small></div>
+          <div>
+            <div class="tags">
+              <span class="tag" id="band">--</span>
+              <span class="tag" id="rmode">--</span>
+              <span class="tag" id="rigtag">--</span>
+              <span class="smeter" id="smeter" title="S-meter"></span>
+            </div>
+            <div class="btns" style="margin-top:8px">
+              <span id="bandbtns" class="btns"></span>
+              <span style="width:8px"></span>
+              <span id="modebtns" class="btns"></span>
+            </div>
+          </div>
+        </div>
+        <div class="note" id="rignote"></div>
+      </div>
+
+      <div class="entry" id="entry" data-status="">
+        <div class="row">
+          <label class="fld"><span>Callsign</span><input id="call" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+          <div class="sendbox" id="sendbox"><span>You send</span><b id="stx">001</b><em id="mybranch"></em></div>
+          <label class="fld" id="f-srx"><span>Their serial</span><input id="srx" inputmode="numeric" autocomplete="off"></label>
+          <label class="fld" id="f-exch"><span id="exchlabel">Branch</span><input id="exch" autocomplete="off"></label>
+          <label class="fld" id="f-name"><span>Name</span><input id="name" autocomplete="off"></label>
+          <label class="fld rst"><span>RST sent</span><input id="rsts" autocomplete="off"></label>
+          <label class="fld rst"><span>RST rcvd</span><input id="rstr" autocomplete="off"></label>
+          <button class="primary" id="logbtn">Log &#9166;</button>
+        </div>
+        <div class="statusline"><span id="msg"></span><span id="saved"></span></div>
+        <div class="keys"><kbd>Space</kbd> next field &nbsp; <kbd>Enter</kbd> log &nbsp; <kbd>Esc</kbd> clear &nbsp; band, mode, frequency and time come from the radio</div>
+      </div>
+
+      <div class="panel logwrap">
+        <div class="loghead">
+          <h3 style="margin:0">Log</h3><span class="muted" id="logcount"></span>
+          <div class="spacer"></div>
+          <span id="exports"></span>
+        </div>
+        <div class="tablebox"><table class="log"><thead><tr>
+          <th>Time</th><th>Call</th><th>Band</th><th>Mode</th><th>Sent</th><th>Received</th><th>Pts</th><th>Op</th>
+        </tr></thead><tbody id="logbody"></tbody></table></div>
+      </div>
+    </main>
+
+    <aside class="side">
+      <div class="panel">
+        <h3>Score</h3>
+        <div class="big" id="score">0</div>
+        <div class="stats">
+          <div class="stat"><b id="s-count">0</b><span>contacts</span></div>
+          <div class="stat"><b id="s-mults">0</b><span>mults</span></div>
+          <div class="stat"><b id="s-rate">0</b><span>last hour</span></div>
+        </div>
+        <table class="breakdown" id="breakdown"></table>
+      </div>
+      <div class="panel" id="periodpanel">
+        <h3 id="periodtitle">Operating period</h3>
+        <div class="count" id="countdown">--:--</div>
+        <div class="muted" id="periodrange"></div>
+        <div class="bar"><i id="periodbar" style="width:0%"></i></div>
+        <div class="muted" style="margin-top:8px"><b id="s-period">0</b> contacts this period</div>
+      </div>
+      <div class="panel" id="availpanel">
+        <h3>Available again</h3>
+        <div class="muted" id="availnote"></div>
+        <div class="avail" id="avail"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<dialog id="dlg-settings">
+  <h2>Settings</h2>
+  <div class="form">
+    <label>Station callsign<input id="st-callsign" style="text-transform:uppercase"></label>
+    <label>Operator callsign<input id="st-operator" style="text-transform:uppercase"></label>
+    <label>Your NZART branch number<input id="st-branch" placeholder="blank or 00 for home station"></label>
+    <label>Station name<input id="st-station"></label>
+    <label>Radio<select id="st-radio_source">
+      <option value="auto">Automatic (find IC-7300 / IC-705 on USB)</option>
+      <option value="sim">Simulated radio</option>
+      <option value="rigctld">Hamlib rigctld at the address below</option></select></label>
+    <label>rigctld address : port<span style="display:flex;gap:6px"><input id="st-rigctld_host" style="flex:1"><input id="st-rigctld_port" style="width:80px"></span></label>
+    <label>Grid locator (for FT8)<input id="st-grid" placeholder="e.g. RE53" style="text-transform:uppercase"></label>
+    <label>Radio audio<select id="st-audio_source">
+      <option value="auto">Automatic (radio's USB sound card)</option>
+      <option value="sim">Simulated audio</option>
+      <option value="device">Sound device named below</option></select></label>
+    <label class="wide">Sound device (leave blank to find the radio automatically)<input id="st-audio_device" placeholder="plughw:CARD=CODEC,DEV=0"></label>
+    <label class="wide">Backup folder (e.g. a USB stick) - every contact is also copied here as it is logged<input id="st-mirror_dir" placeholder="/media/usb/qsodesk"></label>
+    <label class="wide">Trans-Tasman serial numbers<select id="st-tt_serial_per_band">
+      <option value="0">One series (single operator, multi-single)</option>
+      <option value="1">Separate series per band (multi-multi)</option></select></label>
+  </div>
+  <div class="actions"><span class="muted left" id="version"></span><button id="st-cancel">Cancel</button><button class="primary" id="st-save">Save</button></div>
+</dialog>
+
+<dialog id="dlg-event">
+  <h2>New event</h2>
+  <p class="muted">Each event is its own log, with serial numbers starting again at 001.</p>
+  <div class="form">
+    <label class="wide">Type<select id="ev-contest"></select></label>
+    <label class="wide">Name<input id="ev-name" placeholder="e.g. Jock White 2027"></label>
+  </div>
+  <div class="actions"><button id="ev-cancel">Cancel</button><button class="primary" id="ev-save">Start</button></div>
+</dialog>
+
+<dialog id="dlg-edit">
+  <h2>Edit contact</h2>
+  <div class="form">
+    <label>Callsign<input id="ed-call" style="text-transform:uppercase"></label>
+    <label>Band<select id="ed-band"></select></label>
+    <label>Mode<select id="ed-mode"><option>PH</option><option>CW</option><option>DIG</option></select></label>
+    <label>Serial sent<input id="ed-serial_sent"></label>
+    <label>RST sent<input id="ed-rst_sent"></label>
+    <label>RST received<input id="ed-rst_rcvd"></label>
+    <label>Serial received<input id="ed-serial_rcvd"></label>
+    <label>Branch / exchange<input id="ed-exch"></label>
+    <label>Name<input id="ed-name"></label>
+    <label>Notes<input id="ed-notes"></label>
+  </div>
+  <p class="muted" id="ed-hist"></p>
+  <div class="actions"><button class="left danger" id="ed-delete">Delete</button><button id="ed-cancel">Cancel</button><button class="primary" id="ed-save">Save</button></div>
+</dialog>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = (n, w) => String(n).padStart(w || 2, "0");
+const hhmm = ts => { const d = new Date(ts * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+
+let S = null;              // last state from the server
+let R = {};                // live radio state
+let status = "";           // ok | new | mult | dupe | invalid
+let dupeArmed = false;     // Enter pressed once on a dupe
+let exchAuto = false;      // branch was pre-filled, not typed
+let checkSeq = 0;
+let checkedKey = "";       // what the last finished check was for
+let editing = null;
+let online = true;
+const minSerial = {};      // highest serial handed out locally, per scope
+
+/* ---------- offline queue: contacts wait here until the Pi confirms ---------- */
+let queue = [];
+try { queue = JSON.parse(localStorage.getItem("qsodesk_queue") || "[]"); } catch (e) {}
+const saveQueue = () => { try { localStorage.setItem("qsodesk_queue", JSON.stringify(queue)); } catch (e) {} };
+let flushing = false;
+
+async function api(path, body, timeout) {
+  const opt = body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {};
+  if (timeout) { const ac = new AbortController(); setTimeout(() => ac.abort(), timeout); opt.signal = ac.signal; }
+  const r = await fetch(path, opt);
+  const j = await r.json();
+  if (!r.ok) throw Object.assign(new Error(j.error || "Request failed"), {server: true});
+  return j;
+}
+
+async function flush() {
+  if (flushing) return;
+  flushing = true;
+  while (queue.length) {
+    try {
+      const res = await api("/api/qso", queue[0], 5000);
+      queue.shift(); saveQueue(); setOnline(true);
+      showSaved(res);
+    } catch (e) {
+      if (e.server) { queue.shift(); saveQueue(); $("msg").textContent = "Not logged: " + e.message; continue; }
+      setOnline(false);
+      break;
+    }
+  }
+  flushing = false;
+  renderQueue();
+  if (queue.length) setTimeout(flush, 3000); else refresh();
+}
+
+function setOnline(v) {
+  online = v;
+  renderQueue();
+}
+function renderQueue() {
+  const el = $("offline");
+  if (!online || queue.length > 1) {
+    el.style.display = "block";
+    el.textContent = (online ? "" : "No connection to QSODesk. Keep logging - ") + queue.length +
+      " contact" + (queue.length === 1 ? "" : "s") + " held safely in this browser, waiting to send.";
+  } else el.style.display = "none";
+}
+function showSaved(res) {
+  const el = $("saved"), s = res.saved || {};
+  let txt = esc(res.qso.call) + " saved: card ✓  journal " + (s.journal ? "✓" : "✗");
+  let cls = s.journal ? "good" : "bad";
+  if (s.mirror === true) txt += "  backup ✓";
+  else if (s.mirror === false) { txt += "  backup ✗ (check the backup folder)"; cls = "warn"; }
+  else txt += "  backup —";
+  if (res.serial_changed) { txt += "  · serial changed to " + pad(res.qso.serial_sent, 3); cls = "warn"; }
+  el.textContent = txt; el.className = cls;
+}
+
+/* ---------- state ---------- */
+async function refresh() {
+  try { S = await api("/api/state"); setOnline(true); } catch (e) { setOnline(false); return; }
+  if (!R.freq) R = S.radio;
+  render();
+}
+
+function scopeKey() { return S.event.name + "|" + (S.serial_scope == null ? "-" : S.serial_scope); }
+function nextSerial() {
+  if (S.serial == null) return null;
+  const mine = queue.filter(q => q.event === S.event.name && (!S.serial_scope || q.band === R.band)).length;
+  return Math.max(S.serial + mine, minSerial[scopeKey()] || 0);
+}
+function rstDefault() { return R.mode === "PH" ? "59" : "599"; }
+
+function render() {
+  const c = S.contest, st = S.settings;
+  $("me").textContent = st.callsign || "set your callsign → Settings";
+  $("eventsel").innerHTML = S.events.map(e => `<option ${e.name === S.event.name ? "selected" : ""}>${esc(e.name)}</option>`).join("");
+  $("version").textContent = "QSODesk " + S.version;
+
+  // entry fields for this contest
+  const has = f => c.fields.includes(f);
+  $("f-srx").style.display = has("serial") ? "" : "none";
+  $("f-exch").style.display = has("exch") ? "" : "none";
+  $("f-name").style.display = has("name") ? "" : "none";
+  $("sendbox").style.display = c.has_serial ? "" : "none";
+  $("exchlabel").textContent = c.exch_label || "Exchange";
+  $("mybranch").textContent = has("exch") ? (st.branch || "00") : "";
+  renderSerial();
+  if (!$("rsts").value) $("rsts").value = rstDefault();
+  if (!$("rstr").value) $("rstr").value = rstDefault();
+
+  // score
+  $("score").textContent = S.score.total.toLocaleString();
+  $("s-count").textContent = S.score.count;
+  $("s-mults").textContent = S.score.mults;
+  const hourAgo = Date.now() / 1000 - 3600;
+  $("s-rate").textContent = S.qsos.filter(q => !q.deleted && q.ts >= hourAgo).length;
+  let bd = "";
+  if (S.score.lines.length) {
+    bd = "<tr><th></th><th>QSOs</th><th>Pts</th><th>Mults</th></tr>" + S.score.lines.map(l =>
+      `<tr><td>${l.label === "block" ? hhmm(l.start) + " block" : esc(l.label)}</td><td>${l.count}</td><td>${l.points}</td><td>${l.mults}</td></tr>`).join("");
+  }
+  $("breakdown").innerHTML = bd;
+
+  // period + available again
+  $("periodpanel").style.display = S.period ? "" : "none";
+  $("availpanel").style.display = S.period ? "" : "none";
+  if (S.period) {
+    $("periodtitle").textContent = c.period_seconds === 3600 ? "Operating period" : "Block";
+    $("periodrange").textContent = hhmm(S.period.start) + " – " + hhmm(S.period.end);
+    $("s-period").textContent = S.qsos.filter(q => !q.deleted && q.ts >= S.period.start && q.ts < S.period.end).length;
+    $("avail").innerHTML = S.available.map(a =>
+      `<button data-call="${esc(a.call)}">${esc(a.call)}${a.exch ? " <small>" + esc(a.exch) + "</small>" : ""}</button>`).join("");
+    $("availnote").textContent = S.available.length ?
+      "Worked last period on " + R.band + " " + R.mode + " - workable again now:" :
+      "Stations from the previous period on this band and mode appear here when they can be worked again.";
+  }
+
+  // exports
+  const ev = encodeURIComponent(S.event.name);
+  let ex = `<a href="/export/adif?event=${ev}">ADIF</a> `;
+  if (c.key === "jwfd") ex += `<a href="/export/sheets?event=${ev}">Log sheets</a> <a href="/export/summary?event=${ev}">Summary</a> `;
+  if (c.key === "tt") ex += `<a href="/export/cabrillo?event=${ev}">Cabrillo</a> <a href="/export/summary?event=${ev}">Summary</a> `;
+  ex += `<a href="/export/journal">Journal</a>`;
+  $("exports").innerHTML = ex;
+
+  // log table, newest first, with a divider at each period change
+  $("logcount").textContent = S.total_logged + " contact" + (S.total_logged === 1 ? "" : "s");
+  let rows = "", lastP = null;
+  for (const q of S.qsos) {
+    if (c.period_seconds) {
+      const p = Math.floor(q.ts / c.period_seconds);
+      if (p !== lastP) {
+        rows += `<tr class="sep"><td colspan="8">${hhmm(p * c.period_seconds)} – ${hhmm((p + 1) * c.period_seconds)}</td></tr>`;
+        lastP = p;
+      }
+    }
+    const sent = [q.rst_sent, q.serial_sent != null ? pad(q.serial_sent, 3) : ""].join(" ");
+    const rcvd = [q.rst_rcvd, q.serial_rcvd, q.exch, q.name].filter(Boolean).join(" ");
+    rows += `<tr class="q ${q.deleted ? "del" : ""}" data-uuid="${q.uuid}"><td>${hhmm(q.ts)}</td>` +
+      `<td class="c-call">${esc(q.call)}${q.mark.mult ? '<span class="pill mult">MULT</span>' : ""}${q.mark.dupe ? '<span class="pill dupe">DUPE</span>' : ""}</td>` +
+      `<td>${esc(q.band)}</td><td>${esc(q.mode)}</td><td>${esc(sent)}</td><td>${esc(rcvd)}</td>` +
+      `<td>${q.deleted ? "" : q.mark.pts}</td><td>${esc(q.operator)}</td></tr>`;
+  }
+  $("logbody").innerHTML = rows || '<tr><td colspan="8" class="muted" style="padding:16px 8px">No contacts yet. Type a callsign above and press Enter.</td></tr>';
+
+  if (S.recovered && !render.toldRecovered) {
+    render.toldRecovered = true;
+    const b = $("banner"); b.style.display = "block";
+    b.textContent = "The log was rebuilt from the journal after an unclean shutdown: " + S.recovered + " contacts recovered.";
+  }
+  renderRadio();
+}
+
+function renderSerial() {
+  const n = nextSerial();
+  $("stx").textContent = n == null ? "" : pad(n, 3);
+}
+
+function renderRadio() {
+  const r = R;
+  if (!r || r.freq == null) return;
+  const mhz = (r.freq / 1e6).toFixed(5), i = mhz.indexOf(".");
+  $("freq").innerHTML = mhz.slice(0, i) + "." + mhz.slice(i + 1, i + 4) + "." + mhz.slice(i + 4) + "<small>MHz</small>";
+  $("band").textContent = r.band || "out of band";
+  $("rmode").textContent = r.rmode || "--";
+  const tag = $("rigtag");
+  tag.textContent = !r.connected ? "NO RADIO" : r.simulated ? "SIMULATED RADIO" : r.name;
+  tag.className = "tag " + (!r.connected ? "bad" : r.simulated ? "sim" : "live");
+  $("rignote").textContent = r.note || "";
+  let bars = "";
+  for (let k = 1; k <= 9; k++) bars += `<i class="${r.smeter != null && k <= r.smeter ? "lit" : ""}" style="height:${6 + k * 1.8}px"></i>`;
+  $("smeter").innerHTML = bars;
+  if (S) {
+    $("bandbtns").innerHTML = S.contest.bands.slice(0, 10).map(b => `<button data-band="${b}" class="${b === r.band ? "on" : ""}">${b}</button>`).join("");
+    $("modebtns").innerHTML = S.contest.modes.map(m => `<button data-mode="${m}" class="${m === r.mode ? "on" : ""}">${m}</button>`).join("");
+  }
+}
+
+/* ---------- live updates from the Pi ---------- */
+function connect() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("radio", e => {
+    const prev = R; R = JSON.parse(e.data);
+    renderRadio();
+    if (prev.band !== R.band || prev.mode !== R.mode) {
+      $("rsts").value = rstDefault(); $("rstr").value = rstDefault();
+      refresh().then(check);
+    }
+  });
+  es.addEventListener("log", () => refresh().then(check));
+  es.onopen = () => { setOnline(true); flush(); };
+  es.onerror = () => setOnline(false);
+}
+
+/* ---------- the entry line ---------- */
+function setStatus(s, msg) {
+  status = s; $("entry").dataset.status = s; $("msg").textContent = msg || "";
+}
+
+const checkKey = () => [$("call").value.trim().toUpperCase(), R.band, R.mode, exchAuto ? "" : $("exch").value.trim()].join("|");
+
+async function check() {
+  const call = $("call").value.trim().toUpperCase();
+  if (!call) { checkedKey = checkKey(); setStatus("", ""); return; }
+  const seq = ++checkSeq, key = checkKey();
+  try {
+    const typed = exchAuto ? "" : $("exch").value.trim();
+    const r = await api(`/api/check?call=${encodeURIComponent(call)}&band=${encodeURIComponent(R.band || "")}&mode=${R.mode || ""}&exch=${encodeURIComponent(typed)}`, null, 700);
+    if (seq !== checkSeq) return;
+    checkedKey = key;
+    setStatus(r.status, r.msg);
+    if (S.contest.fields.includes("exch") && r.exch && (exchAuto || !$("exch").value)) { $("exch").value = r.exch; exchAuto = true; }
+    if (S.contest.fields.includes("name") && r.name && !$("name").value) $("name").value = r.name;
+  } catch (e) { /* offline: log anyway, the Pi will sort out dupes */ }
+}
+
+function clearEntry() {
+  for (const id of ["call", "srx", "exch", "name"]) $(id).value = "";
+  $("rsts").value = rstDefault(); $("rstr").value = rstDefault();
+  exchAuto = false; dupeArmed = false; setStatus("", "");
+  $("call").focus();
+}
+
+function nextField(from) {
+  const order = ["call"].concat(S.contest.fields.map(f => ({serial: "srx", exch: "exch", name: "name"}[f])));
+  const i = order.indexOf(from);
+  const next = order[i + 1];
+  if (next) { $(next).focus(); $(next).select(); }
+}
+
+async function submit() {
+  const c = S.contest, call = $("call").value.trim().toUpperCase();
+  if (!call) { $("call").focus(); return; }
+  if (submit.busy) return;
+  submit.busy = true;
+  try { if (checkedKey !== checkKey()) await check(); }   // typed faster than the check came back
+  finally { submit.busy = false; }
+  if ($("call").value.trim().toUpperCase() !== call) return;
+  if (c.fields.includes("serial") && !$("srx").value.trim()) { $("msg").textContent = "Their serial number?"; $("srx").focus(); return; }
+  if (c.key === "jwfd" && !$("exch").value.trim()) { $("msg").textContent = "Their branch number? (00 for a home station)"; $("exch").focus(); return; }
+  if (status === "dupe" && !dupeArmed) { dupeArmed = true; $("msg").textContent = "Dupe - press Enter again to log it anyway, Esc to clear"; return; }
+  const serial = nextSerial();
+  const q = {
+    uuid: (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2)),
+    event: S.event.name, ts: Date.now() / 1000, call: call,
+    band: R.band, mode: R.mode, rmode: R.rmode, freq: R.freq,
+    rst_sent: $("rsts").value.trim(), rst_rcvd: $("rstr").value.trim(),
+    serial_sent: serial, serial_rcvd: $("srx").value.trim(),
+    exch: $("exch").value.trim(), name: $("name").value.trim(),
+  };
+  if (serial != null) minSerial[scopeKey()] = serial + 1;
+  queue.push(q); saveQueue();
+  clearEntry(); renderSerial();
+  flush();
+}
+
+for (const id of ["call", "srx", "exch", "name", "rsts", "rstr"]) {
+  $(id).addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+    else if (e.key === "Escape") { e.preventDefault(); clearEntry(); }
+    else if (e.key === " " && id !== "name") { e.preventDefault(); nextField(id); }
+  });
+}
+$("call").addEventListener("input", () => {
+  $("call").value = $("call").value.toUpperCase().replace(/\s/g, "");
+  if (exchAuto) { $("exch").value = ""; exchAuto = false; }
+  dupeArmed = false;
+  check();
+});
+$("exch").addEventListener("input", () => { exchAuto = false; dupeArmed = false; check(); });
+$("logbtn").addEventListener("click", submit);
+
+/* ---------- radio buttons, available-again, table clicks ---------- */
+$("bandbtns").addEventListener("click", e => { const b = e.target.dataset.band; if (b) api("/api/radio", {band: b}); $("call").focus(); });
+$("modebtns").addEventListener("click", e => { const m = e.target.dataset.mode; if (m) api("/api/radio", {mode: m, band: R.band}); $("call").focus(); });
+$("avail").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("call").value = b.dataset.call; check(); nextField("call");
+});
+$("eventsel").addEventListener("change", e => api("/api/settings", {current_event: e.target.value}).then(clearEntry));
+
+/* ---------- edit dialog ---------- */
+$("logbody").addEventListener("click", async e => {
+  const tr = e.target.closest("tr.q"); if (!tr) return;
+  editing = S.qsos.find(q => q.uuid === tr.dataset.uuid); if (!editing) return;
+  $("ed-band").innerHTML = S.contests.find(c => c.key === "general").bands.map(b => `<option>${b}</option>`).join("");
+  for (const k of ["call", "band", "mode", "serial_sent", "rst_sent", "rst_rcvd", "serial_rcvd", "exch", "name", "notes"])
+    $("ed-" + k).value = editing[k] == null ? "" : editing[k];
+  $("ed-delete").textContent = editing.deleted ? "Restore" : "Delete";
+  const h = await api("/api/history?uuid=" + editing.uuid);
+  $("ed-hist").textContent = h.length ? "Changed " + h.length + " time" + (h.length === 1 ? "" : "s") + " - earlier versions are kept." : "";
+  $("dlg-edit").showModal();
+});
+$("ed-cancel").onclick = () => $("dlg-edit").close();
+$("ed-save").onclick = async () => {
+  const values = {};
+  for (const k of ["call", "band", "mode", "serial_sent", "rst_sent", "rst_rcvd", "serial_rcvd", "exch", "name", "notes"]) values[k] = $("ed-" + k).value.trim();
+  await api("/api/qso/edit", {uuid: editing.uuid, values});
+  $("dlg-edit").close(); $("call").focus();
+};
+$("ed-delete").onclick = async () => {
+  await api("/api/qso/delete", {uuid: editing.uuid, deleted: !editing.deleted});
+  $("dlg-edit").close(); $("call").focus();
+};
+
+/* ---------- settings and new event ---------- */
+const SETTINGS = ["callsign", "operator", "branch", "station", "radio_source", "rigctld_host", "rigctld_port", "mirror_dir", "tt_serial_per_band", "grid", "audio_source", "audio_device"];
+$("opensettings").onclick = () => { for (const k of SETTINGS) $("st-" + k).value = S.settings[k] || ""; $("dlg-settings").showModal(); };
+$("st-cancel").onclick = () => $("dlg-settings").close();
+$("st-save").onclick = async () => {
+  const b = {};
+  for (const k of SETTINGS) b[k] = $("st-" + k).value.trim();
+  b.callsign = b.callsign.toUpperCase(); b.operator = b.operator.toUpperCase(); b.grid = b.grid.toUpperCase();
+  await api("/api/settings", b);
+  $("dlg-settings").close(); $("call").focus();
+};
+$("newevent").onclick = () => {
+  $("ev-contest").innerHTML = S.contests.map(c => `<option value="${c.key}">${esc(c.name)}</option>`).join("");
+  $("ev-name").value = ""; $("dlg-event").showModal(); $("ev-name").focus();
+};
+$("ev-cancel").onclick = () => $("dlg-event").close();
+$("ev-save").onclick = async () => {
+  try { await api("/api/event", {name: $("ev-name").value, contest: $("ev-contest").value}); }
+  catch (e) { $("ev-name").placeholder = e.message; $("ev-name").focus(); return; }
+  $("dlg-event").close(); clearEntry();
+};
+
+/* ---------- clocks ---------- */
+let lastPeriodKey = null;
+function tick() {
+  const d = new Date();
+  $("clock").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  $("utc").textContent = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + " UTC";
+  if (S && S.period) {
+    const len = S.contest.period_seconds, now = d.getTime() / 1000;
+    const key = Math.floor(now / len), left = Math.max(0, Math.ceil((key + 1) * len - now));
+    const m = Math.floor(left / 60), s = left % 60;
+    $("countdown").textContent = (m >= 60 ? Math.floor(m / 60) + ":" + pad(m % 60) : m) + ":" + pad(s);
+    $("countdown").className = "count" + (left <= 120 ? " soon" : "");
+    $("periodbar").style.width = (100 * (1 - left / len)).toFixed(1) + "%";
+    if (lastPeriodKey !== null && key !== lastPeriodKey) refresh().then(check);   // new period: dupes reset
+    lastPeriodKey = key;
+  }
+}
+
+refresh().then(() => { connect(); flush(); clearEntry(); });
+setInterval(tick, 1000); tick();
+window.addEventListener("online", flush);
+</script>
+</body>
+</html>

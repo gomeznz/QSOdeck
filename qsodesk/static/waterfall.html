@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - Waterfall</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="panel">
+    <div class="row" style="margin-bottom:10px">
+      <h3 style="margin:0">Receiver audio</h3>
+      <div class="spacer"></div>
+      <label class="muted">Width <select id="span">
+        <option value="0,3000">0 - 3 kHz (SSB)</option>
+        <option value="200,1200">200 - 1200 Hz (CW)</option>
+        <option value="0,1500">0 - 1.5 kHz</option>
+        <option value="0,6000">0 - 6 kHz</option></select></label>
+      <label class="muted">Speed <select id="speed">
+        <option value="1200">Slow</option><option value="600" selected>Normal</option><option value="300">Fast</option></select></label>
+      <label class="muted">Scale <select id="scale">
+        <option value="rf">Radio frequency</option><option value="af">Audio Hz</option></select></label>
+      <label class="muted"><input type="checkbox" id="tune" checked> Click a signal to tune it to the centre</label>
+    </div>
+    <div id="wf"></div>
+    <div class="note" id="note"></div>
+    <p class="muted">This shows what the receiver is hearing: the audio passband from the radio's USB sound card, about 3 kHz wide.
+      Newest signals are at the top. Brighter means stronger.</p>
+  </div>
+</div>
+<script src="/static/qd.js"></script>
+<script>
+"use strict";
+const {$, api} = QD;
+QD.header("waterfall");
+const H = Math.max(320, window.innerHeight - 290);
+let spec = new QD.Spectrum(2048, 600);
+const CENTRE = 1500;
+
+// audio Hz -> radio frequency, depending on the sideband in use
+function rf(f) {
+  const r = QD.state.radio, m = (r.rmode || "").toUpperCase();
+  if (!r.freq) return null;
+  if (m === "LSB" || m === "PKTLSB") return r.freq - f;
+  if (m === "USB" || m === "PKTUSB" || m === "RTTY") return r.freq + f;
+  return null;                                   // CW/AM/FM: audio pitch only
+}
+function label(f) {
+  const v = $("scale").value === "rf" ? rf(f) : null;
+  return v === null ? String(Math.round(f)) : (v / 1000).toFixed(2);
+}
+function readout(f) {
+  const v = rf(f);
+  return Math.round(f) + " Hz" + (v === null ? "" : "  =  " + (v / 1000).toFixed(2) + " kHz");
+}
+const wf = new QD.Waterfall($("wf"), {fmin: 0, fmax: 3000, height: H, label, readout});
+spec.on((db, hz) => wf.row(db, hz));
+
+const feed = new QD.AudioFeed();
+feed.on(s => spec.push(s));
+feed.start();
+
+function marks() { wf.setMarks($("tune").checked ? [{f: CENTRE, label: "centre", color: "#5cb3ff"}] : []); }
+$("span").onchange = e => { const [a, b] = e.target.value.split(",").map(Number); wf.setRange(a, b); };
+$("speed").onchange = e => { spec.hop = Number(e.target.value); };
+$("scale").onchange = () => wf.drawAxis();
+$("tune").onchange = marks;
+QD.on("radio", () => wf.drawAxis());
+marks();
+
+wf.onclick = async f => {
+  if (!$("tune").checked) return;
+  const r = QD.state.radio, m = (r.rmode || "").toUpperCase();
+  const dir = (m === "LSB" || m === "PKTLSB") ? -1 : (m === "USB" || m === "PKTUSB" || m === "RTTY") ? 1 : 0;
+  if (!dir) { $("note").textContent = "Click-to-tune works in SSB and data modes. For CW, use the CW page."; return; }
+  try {
+    await api("/api/radio", {freq: Math.round(r.freq + dir * (f - CENTRE))});
+    $("note").textContent = r.simulated ? "Dial moved. (On the simulated radio the pretend signals stay where they are.)" : "";
+  } catch (e) { $("note").textContent = e.message; }
+};
+</script>
+</body>
+</html>

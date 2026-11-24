@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - CW</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+#rx{font-family:var(--mono);font-size:24px;font-weight:600;letter-spacing:1px;min-height:150px;max-height:260px;overflow-y:auto;
+  background:#0b1016;border:1px solid var(--line);border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-word}
+#rx .cur{display:inline-block;width:10px;height:22px;background:var(--amber);vertical-align:-3px;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.read b{font-family:var(--mono);font-size:20px;color:var(--amber)}
+.read span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;display:block}
+#txt{flex:1;font-family:var(--mono);font-size:20px;text-transform:uppercase}
+#txt::placeholder{font-size:14px;text-transform:none;font-family:system-ui,sans-serif}
+#sent{font-family:var(--mono);font-size:14px;color:var(--dim);max-height:120px;overflow-y:auto;margin-top:10px}
+#sent div b{color:var(--red);font-weight:600;margin-right:6px}
+.macros{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.macros button{text-align:left;font-family:var(--mono);font-size:13px}
+.macros button kbd{margin-right:6px}
+#dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--line);vertical-align:-1px;margin-right:6px}
+#dot.on{background:var(--green)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="note" id="modenote"></div>
+  <div class="grid2">
+    <div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:8px">
+          <h3 style="margin:0">Receive</h3>
+          <div class="spacer"></div>
+          <div class="read"><span>Tone</span><b id="tone">650 Hz</b></div>
+          <div class="read"><span>Speed</span><b id="wpm">-- wpm</b></div>
+          <label class="muted"><input type="checkbox" id="auto" checked> Follow the strongest signal</label>
+          <button id="clear">Clear</button>
+        </div>
+        <div id="wf"></div>
+        <p class="muted" style="margin:6px 0 10px"><span id="dot"></span>Click a signal on the waterfall to decode that one.</p>
+        <div id="rx"><span class="cur"></span></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>Send</h3>
+        <div class="row" style="margin-bottom:10px">
+          <label class="muted">Their call <input id="dx" style="width:120px;font-family:var(--mono);text-transform:uppercase"></label>
+          <label class="muted">Speed <input id="spd" type="number" min="5" max="50" style="width:70px"> wpm</label>
+        </div>
+        <div class="macros" id="macros"></div>
+        <div class="row" style="margin-top:10px">
+          <input id="txt" placeholder="Type and press Enter to send" autocomplete="off" spellcheck="false">
+          <button class="primary" id="send">Send</button>
+          <button class="stop" id="stop">Stop</button>
+        </div>
+        <div id="sent"></div>
+        <p class="muted" id="how"></p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/qd.js"></script>
+<script>
+"use strict";
+const {$, api, esc, pad} = QD;
+QD.header("cw");
+
+/* ---------- receive ---------- */
+let text = "";
+const rx = $("rx");
+const dec = new QD.CWDecoder(ch => {
+  if (ch === " " && (text.endsWith(" ") || !text)) return;
+  text += ch; if (text.length > 4000) text = text.slice(-3000);
+  rx.innerHTML = esc(text) + '<span class="cur"></span>'; rx.scrollTop = rx.scrollHeight;
+});
+const spec = new QD.Spectrum(2048, 600);
+const wf = new QD.Waterfall($("wf"), {fmin: 200, fmax: 1200, height: 190});
+const avg = new Float32Array(1024); let rows = 0;
+
+function setTone(f) {
+  dec.setFreq(f); $("tone").textContent = Math.round(f) + " Hz";
+  wf.setMarks([{f: f, label: Math.round(f) + "", color: "#ffb224"}]);
+}
+spec.on((db, hz) => {
+  wf.row(db, hz);
+  for (let i = 0; i < avg.length; i++) avg[i] += 0.3 * (db[i] - avg[i]);
+  if (++rows % 4 === 0) {
+    $("wpm").textContent = dec.signal ? dec.wpm + " wpm" : "-- wpm";
+    $("dot").className = dec.signal ? "on" : "";
+    if ($("auto").checked) {                       // follow the strongest steady tone
+      let best = 0, bi = 0, sum = 0, n = 0;
+      for (let i = Math.round(300 / hz); i <= Math.round(1100 / hz); i++) { sum += avg[i]; n++; if (avg[i] > best) { best = avg[i]; bi = i; } }
+      const f = bi * hz, here = avg[Math.round(dec.freq / hz)];
+      // move only to a clearly stronger signal, so a second station can't steal the decoder mid-word
+      if (best - sum / n > 12 && Math.abs(f - dec.freq) > 15 && (best - here > 10 || !dec.signal)) setTone(f);
+    }
+  }
+});
+wf.onclick = f => { $("auto").checked = false; setTone(f); };
+$("clear").onclick = () => { text = ""; rx.innerHTML = '<span class="cur"></span>'; };
+setTone(650);
+const feed = new QD.AudioFeed();
+feed.on(s => { spec.push(s); dec.push(s); });
+feed.start();
+
+/* ---------- send ---------- */
+const MACROS = [
+  ["F1", "CQ", "CQ TEST DE {MYCALL} {MYCALL}"],
+  ["F2", "Exchange", "{CALL} 5NN {SERIAL} {BRANCH}"],
+  ["F3", "Thanks", "TU {MYCALL}"],
+  ["F4", "My call", "{MYCALL}"],
+  ["F5", "Their call", "{CALL}"],
+  ["F6", "Again?", "AGN"],
+];
+let app = null;
+function fill(t) {
+  const s = app ? app.settings : {};
+  const serial = app && app.serial != null ? pad(app.serial, 3) : "";
+  const branch = app && app.contest.fields.includes("exch") ? (s.branch || "00") : "";
+  return t.replace("{MYCALL}", s.callsign || "").replace("{MYCALL}", s.callsign || "").replace("{CALL}", $("dx").value.trim().toUpperCase())
+    .replace("{SERIAL}", serial).replace("{BRANCH}", branch).replace(/\s+/g, " ").trim();
+}
+function drawMacros() {
+  $("macros").innerHTML = MACROS.map((m, i) => `<button data-i="${i}" title="${esc(fill(m[2]))}"><kbd>${m[0]}</kbd>${m[1]}</button>`).join("");
+}
+async function send(t) {
+  t = t.trim().toUpperCase(); if (!t) return;
+  try {
+    const r = await api("/api/cw/send", {text: t, wpm: Number($("spd").value) || 22});
+    const d = document.createElement("div"); d.innerHTML = "<b>TX</b>" + esc(r.text);
+    $("sent").prepend(d);
+  } catch (e) { const d = document.createElement("div"); d.textContent = e.message; $("sent").prepend(d); }
+}
+$("macros").addEventListener("click", e => { const b = e.target.closest("button"); if (b) send(fill(MACROS[b.dataset.i][2])); });
+$("send").onclick = () => { send($("txt").value); $("txt").value = ""; $("txt").focus(); };
+$("txt").addEventListener("keydown", e => { if (e.key === "Enter") $("send").click(); });
+$("stop").onclick = () => api("/api/cw/stop", {});
+$("spd").onchange = () => api("/api/settings", {cw_wpm: $("spd").value});
+$("dx").oninput = drawMacros;
+document.addEventListener("keydown", e => {
+  const i = MACROS.findIndex(m => m[0] === e.key);
+  if (i >= 0) { e.preventDefault(); send(fill(MACROS[i][2])); }
+  if (e.key === "Escape") $("stop").click();
+});
+QD.on("app", s => {
+  app = s;
+  if (!$("spd").value) $("spd").value = s.settings.cw_wpm || 22;
+  drawMacros();
+  $("how").textContent = s.radio.simulated
+    ? "Simulated radio: what you send is played into the pretend receiver, so you will see it on the waterfall and decoded on the left."
+    : "Sent by the radio's own keyer, so the timing is perfect whatever the Pi is doing. Turn on break-in on the radio.";
+});
+QD.on("log", () => {});
+function modeNote() {
+  const r = QD.state.radio;
+  $("modenote").innerHTML = r.mode && r.mode !== "CW"
+    ? 'The radio is not in CW mode. <button id="gocw">Switch to CW</button>' : "";
+  if ($("gocw")) $("gocw").onclick = () => api("/api/radio", {mode: "CW", band: r.band});
+}
+QD.on("radio", modeNote);
+</script>
+</body>
+</html>
