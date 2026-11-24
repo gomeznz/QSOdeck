@@ -74,6 +74,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
   <div class="actions"><button id="cfg-cancel">Cancel</button><button class="primary" id="cfg-save">Save</button></div></dialog>
 
 <script src="/static/qd.js"></script>
+<script src="/static/keys.js"></script>
 <script>
 "use strict";
 const {$, api, esc, pad} = QD;
@@ -170,11 +171,12 @@ const TYPES = {
       `</table><div class="foot">A rough guide worked out from solar flux and Kp. It is not a prediction for any particular path.</div>`;
   }},
 
-  radio: {name: "Radio", about: "Frequency and mode of the connected radio", render() {
-    const r = QD.state.radio;
-    if (r.freq == null) return `<p class="muted">Waiting for the radio...</p>`;
-    return `<div class="big" style="color:var(--amber)">${(r.freq / 1e6).toFixed(4)}<span style="font-size:18px;color:var(--dim)"> MHz</span></div>` +
-      `<div class="sub mono">${esc(r.band || "out of band")} ${esc(r.rmode || "")}  ·  ${!r.connected ? "no radio" : r.simulated ? "simulated radio" : esc(r.name)}</div>`;
+  radio: {name: "Radios", about: "Frequency and mode of every transceiver", render() {
+    const list = (app ? app.radios : []).map(x => QD.state.radios[x.id]).filter(Boolean);
+    if (!list.length) return `<p class="muted">Waiting for the radio...</p>`;
+    return list.map(r => `<div style="margin-bottom:10px"><div class="foot" style="margin:0">${esc(r.label)}</div>` +
+      `<div class="big" style="color:var(--amber);font-size:${list.length > 1 ? 28 : 40}px">${(r.freq / 1e6).toFixed(4)}<span style="font-size:16px;color:var(--dim)"> MHz</span></div>` +
+      `<div class="sub mono" style="margin-top:2px">${esc(r.band || "out of band")} ${esc(r.rmode || "")}  \u00b7  ${!r.connected ? "no radio" : r.simulated ? "simulated" : esc(r.name)}</div></div>`).join("");
   }},
 
   contest: {name: "Contest", about: "Score and time left in the period", fast: true, render() {
@@ -277,7 +279,7 @@ QD.on("app", s => {
   if (first) { let saved = []; try { saved = JSON.parse(s.settings.dashboard || "[]"); } catch (e) {} layout = norm(saved.length ? saved : DEFAULT); draw(); }
   else if (!editing) draw("data");
 });
-QD.on("radio", () => draw("data"));
+QD.on("anyradio", () => draw("data"));
 QD.on("log", async () => { try { app = await api("/api/state"); draw("data"); } catch (e) {} });
 setInterval(() => draw("fast"), 1000);
 loadWx(); setInterval(loadWx, 60000); setTimeout(loadWx, 6000);

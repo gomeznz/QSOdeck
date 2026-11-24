@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - Radios</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+.rigs{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.rig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.rig.mine{border-color:var(--amber)}
+.rig h2{margin:0;font-size:20px}
+.rig .f{font-family:var(--mono);font-weight:700;font-size:34px;color:var(--amber);line-height:1.1;margin:10px 0 2px}
+.rig .f small{font-size:15px;color:var(--dim);font-weight:400}
+.rig .m{font-family:var(--mono);color:var(--dim)}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.badge{font-size:12px;padding:2px 8px;border-radius:6px;background:rgba(255,178,36,.16);color:var(--amber)}
+.badge.b{background:rgba(92,179,255,.16);color:var(--blue)}
+.smeter{display:inline-flex;gap:3px;align-items:flex-end;height:18px;margin-left:10px;vertical-align:-2px}
+.smeter i{width:6px;background:var(--line);border-radius:2px}
+.smeter i.lit{background:var(--green)}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.acts button{font-size:13px;padding:5px 10px}
+.found{border:1px solid var(--green);background:rgba(61,220,132,.08);border-radius:12px;padding:10px 14px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(520px,94vw)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog h2{margin:0 0 12px;font-size:18px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);margin-bottom:12px}
+.field input,.field select{color:var(--text);width:100%}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.danger{color:var(--red)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="row" style="margin-bottom:12px">
+    <span class="muted">Every transceiver connected to QSODesk. Each logging device chooses the one it is sitting at.</span>
+    <div class="spacer"></div>
+    <button class="primary" id="add">+ Add transceiver</button>
+  </div>
+  <div id="found"></div>
+  <div class="rigs" id="rigs"></div>
+  <p class="muted" style="margin-top:16px">The waterfall, CW and FT8 pages work with one transceiver at a time; choose it with
+    "Use for waterfall, CW and FT8". Logging works with all of them at once.</p>
+</div>
+
+<dialog id="dlg">
+  <h2 id="dlg-title">Transceiver</h2>
+  <label class="field">Name (shown in the log as the station)<input id="f-name" maxlength="30" placeholder="e.g. 80 m station"></label>
+  <label class="field">Connection<select id="f-source">
+    <option value="auto">Automatic - first Icom radio found on USB</option>
+    <option value="usb">A particular USB radio</option>
+    <option value="rigctld">Hamlib rigctld on the network</option>
+    <option value="sim">Simulated radio (for practice)</option></select></label>
+  <label class="field" id="w-usb">USB radio<select id="f-usb"></select></label>
+  <div id="w-net" class="row" style="margin-bottom:12px">
+    <label class="field" style="flex:1;margin:0">rigctld address<input id="f-host" placeholder="127.0.0.1"></label>
+    <label class="field" style="width:110px;margin:0">Port<input id="f-port" placeholder="4532"></label>
+  </div>
+  <label class="field" id="w-audio">Sound device for this radio (blank = find it automatically)<input id="f-audio" placeholder="plughw:CARD=CODEC,DEV=0"></label>
+  <p class="muted" id="dlg-note"></p>
+  <div class="actions"><button class="danger" id="f-remove" style="margin-right:auto">Remove</button><button id="f-cancel">Cancel</button><button class="primary" id="f-save">Save</button></div>
+</dialog>
+
+<script src="/static/qd.js"></script>
+<script src="/static/keys.js"></script>
+<script>
+"use strict";
+const {$, api, esc} = QD;
+QD.header("radios");
+let D = {radios: [], detected: [], audio_radio: ""}, editing = -1;
+const mine = () => { try { return localStorage.getItem("qsodesk_radio") || ""; } catch (e) { return ""; } };
+const cfgOnly = r => ({id: r.id, name: r.name, source: r.source, path: r.path, model: r.model, host: r.host, port: r.port, audio: r.audio});
+
+function how(r) {
+  if (r.source === "sim") return "Simulated radio";
+  if (r.source === "rigctld") return "Hamlib rigctld at " + r.host + ":" + r.port;
+  if (r.source === "usb") return "USB radio";
+  return "Automatic (USB)";
+}
+function draw() {
+  const my = mine() || D.audio_radio;
+  $("found").innerHTML = D.detected.map((d, i) => `<div class="found"><b>${esc(d.label)}</b> is plugged in but not set up.` +
+    `<button class="primary" data-found="${i}">Add it</button></div>`).join("");
+  $("rigs").innerHTML = D.radios.map((r, i) => {
+    const st = QD.state.radios[r.id] || r.state || {};
+    let bars = "";
+    for (let k = 1; k <= 9; k++) bars += `<i class="${st.smeter != null && k <= st.smeter ? "lit" : ""}" style="height:${5 + k * 1.4}px"></i>`;
+    const tag = !st.connected ? ["NOT CONNECTED", "bad"] : st.simulated ? ["SIMULATED", "sim"] : [st.name, "live"];
+    return `<div class="rig ${r.id === my ? "mine" : ""}">` +
+      `<div class="row"><h2>${esc(r.name)}</h2><div class="spacer"></div><span class="tag ${tag[1]}">${esc(tag[0])}</span></div>` +
+      `<div class="f">${st.freq ? (st.freq / 1e6).toFixed(5) : "-.-----"}<small> MHz</small></div>` +
+      `<div class="m">${esc(st.band || "")} ${esc(st.rmode || "")}<span class="smeter">${bars}</span></div>` +
+      `<div class="badges">${r.id === my ? '<span class="badge">This device logs with it</span>' : ""}` +
+      `${r.id === D.audio_radio ? '<span class="badge b">Waterfall, CW and FT8</span>' : ""}</div>` +
+      `<div class="muted">${esc(how(r))}</div>` + (st.note ? `<div class="note">${esc(st.note)}</div>` : "") +
+      `<div class="acts">` +
+      (r.id === my ? "" : `<button data-act="mine" data-i="${i}">Log with this one on this device</button>`) +
+      (r.id === D.audio_radio ? "" : `<button data-act="listen" data-i="${i}">Use for waterfall, CW and FT8</button>`) +
+      `<button data-act="edit" data-i="${i}">Edit</button></div></div>`;
+  }).join("");
+}
+async function load() { try { D = await api("/api/radios"); draw(); } catch (e) { /* retry on next event */ } }
+async function saveAll(list) {
+  try { D = await api("/api/radios/save", {radios: list.map(cfgOnly)}); draw(); return true; }
+  catch (e) { $("dlg-note").textContent = e.message; return false; }
+}
+
+/* ---------- add / edit ---------- */
+function showFields() {
+  const s = $("f-source").value;
+  $("w-usb").style.display = s === "usb" ? "" : "none";
+  $("w-net").style.display = s === "rigctld" ? "" : "none";
+  $("w-audio").style.display = s === "sim" ? "none" : "";
+  $("dlg-note").textContent = s === "sim" ? "A pretend radio with pretend signals. Handy for practising, or for a station whose radio has no computer control."
+    : s === "rigctld" ? "For any radio Hamlib supports: run rigctld for it, here or on another Pi, and give its address."
+    : s === "usb" && !$("f-usb").options.length ? "No supported USB radio is plugged in right now. Plug it in and reopen this window." : "";
+}
+function open(i, preset) {
+  editing = i;
+  const r = i >= 0 ? D.radios[i] : Object.assign({name: "", source: "auto", host: "127.0.0.1", port: 4532, audio: "", path: ""}, preset || {});
+  $("dlg-title").textContent = i >= 0 ? "Edit " + r.name : "Add a transceiver";
+  $("f-name").value = r.name || ""; $("f-source").value = r.source;
+  const opts = D.detected.map(d => [d.path, d.label, d.model]);
+  if (r.path && !opts.some(o => o[0] === r.path)) opts.unshift([r.path, (r.name || "This radio") + " (currently set)", r.model]);
+  $("f-usb").innerHTML = opts.map(o => `<option value="${esc(o[0])}" data-model="${o[2]}" ${o[0] === r.path ? "selected" : ""}>${esc(o[1])}</option>`).join("");
+  $("f-host").value = r.host || "127.0.0.1"; $("f-port").value = r.port || 4532; $("f-audio").value = r.audio || "";
+  $("f-remove").style.display = i >= 0 && D.radios.length > 1 ? "" : "none";
+  showFields(); $("dlg").showModal(); $("f-name").focus();
+}
+$("f-source").onchange = showFields;
+$("add").onclick = () => open(-1);
+$("f-cancel").onclick = () => $("dlg").close();
+$("f-save").onclick = async () => {
+  const usb = $("f-usb").selectedOptions[0];
+  const r = {id: editing >= 0 ? D.radios[editing].id : "", name: $("f-name").value.trim() || "Radio " + (D.radios.length + (editing >= 0 ? 0 : 1)),
+    source: $("f-source").value, path: usb ? usb.value : "", model: usb ? Number(usb.dataset.model) : 0,
+    host: $("f-host").value.trim(), port: Number($("f-port").value) || 4532, audio: $("f-audio").value.trim()};
+  if (r.source === "usb" && !r.path) { $("dlg-note").textContent = "Choose a USB radio, or pick another connection."; return; }
+  const list = D.radios.slice();
+  if (editing >= 0) list[editing] = r; else list.push(r);
+  if (await saveAll(list)) $("dlg").close();
+};
+$("f-remove").onclick = async () => {
+  const list = D.radios.slice(); list.splice(editing, 1);
+  if (await saveAll(list)) $("dlg").close();
+};
+$("found").addEventListener("click", e => {
+  const i = e.target.dataset.found; if (i == null) return;
+  const d = D.detected[i]; open(-1, {name: d.name.replace("Icom ", ""), source: "usb", path: d.path, model: d.model});
+});
+$("rigs").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const r = D.radios[b.dataset.i];
+  if (b.dataset.act === "edit") return open(Number(b.dataset.i));
+  if (b.dataset.act === "mine") { try { localStorage.setItem("qsodesk_radio", r.id); } catch (err) {} draw(); }
+  if (b.dataset.act === "listen") { await api("/api/radios/listen", {id: r.id}); load(); }
+});
+
+QD.on("anyradio", draw); QD.on("radios", load);
+load(); setInterval(load, 15000);
+</script>
+</body>
+</html>

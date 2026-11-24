@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - Keypad</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+table.km{width:100%;border-collapse:collapse}
+table.km th{text-align:left;color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.8px;padding:6px 8px;border-bottom:1px solid var(--line)}
+table.km td{padding:6px 8px;border-bottom:1px solid #1c2531;vertical-align:middle}
+table.km select,table.km input{width:100%}
+.key{font-family:var(--mono);font-weight:700;background:var(--panel2);border:1px solid var(--line);border-bottom-width:3px;border-radius:7px;padding:4px 10px;white-space:nowrap;display:inline-block}
+tr.flash td{background:rgba(255,178,36,.18)}
+#last{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--amber)}
+#capture{display:none;border:2px dashed var(--amber);border-radius:12px;padding:18px;text-align:center;font-size:18px;font-weight:600;margin-bottom:12px}
+ol{margin:6px 0 0 18px;padding:0;color:var(--dim);font-size:14px}
+ol li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="grid2">
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <h3 style="margin:0">Key map</h3><span class="muted" id="saved"></span>
+        <div class="spacer"></div>
+        <button id="preset">Load a suggested 12-key layout</button>
+        <button class="primary" id="add">+ Map a key</button>
+      </div>
+      <div id="capture">Press the key or turn the knob now...<div class="muted" style="font-weight:400;margin-top:6px">Esc to cancel</div></div>
+      <table class="km"><thead><tr><th style="width:150px">Key</th><th style="width:260px">Does this</th><th>Setting</th><th style="width:40px"></th></tr></thead><tbody id="rows"></tbody></table>
+      <p class="muted" id="empty" style="display:none">No keys mapped yet. Press "Map a key", then press a key on your keypad.</p>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>Try it</h3>
+        <div class="muted">Last key seen</div>
+        <div id="last">-</div>
+        <div class="muted" id="lastdoes" style="margin-top:4px">Press any key on the keypad. Mapped keys work here too, so you can test them.</div>
+      </div>
+      <div class="panel">
+        <h3>Setting up a macro keypad</h3>
+        <ol>
+          <li>Plug the keypad into the computer you log on. It appears as an ordinary keyboard, with no driver.</li>
+          <li>Using the maker's programming tool (usually Windows only), set each key to one of <b>F13 to F24</b>. Nothing else uses those, so they can never clash with typing. The keypad remembers them.</li>
+          <li>Set each knob direction to its own key as well, such as Ctrl+F13 and Ctrl+F14. Avoid the volume setting; the computer keeps those for itself.</li>
+          <li>Come back here, press "Map a key", press the key, and choose what it does.</li>
+        </ol>
+        <p class="muted">The map is stored on the Pi and works on every QSODesk page and every device. Any spare keys on a normal keyboard can be mapped the same way.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/qd.js"></script>
+<script src="/static/keys.js"></script>
+<script>
+"use strict";
+const {$, esc} = QD;
+QD.header("keypad");
+let map = {}, capturing = false;
+const A = QDKeys.ACTIONS;
+
+function draw() {
+  const keys = Object.keys(map);
+  $("empty").style.display = keys.length ? "none" : "";
+  $("rows").innerHTML = keys.map(k => {
+    const m = map[k], a = A[m.action] || {};
+    return `<tr data-k="${esc(k)}"><td><span class="key">${esc(k)}</span></td>` +
+      `<td><select data-f="action">${Object.entries(A).map(([id, x]) => `<option value="${id}" ${id === m.action ? "selected" : ""}>${esc(x.name)}${x.page ? " (" + x.page + ")" : ""}</option>`).join("")}</select></td>` +
+      `<td>${a.arg ? `<input data-f="arg" value="${esc(m.arg == null ? a.def : m.arg)}" title="${esc(a.arg)}" placeholder="${esc(a.arg)}">` : '<span class="muted">-</span>'}</td>` +
+      `<td><button data-f="del" title="Remove">✕</button></td></tr>`;
+  }).join("");
+}
+async function save() {
+  try { await QDKeys.save(map); $("saved").textContent = "saved"; setTimeout(() => { $("saved").textContent = ""; }, 1200); }
+  catch (e) { $("saved").textContent = "could not save: " + e.message; }
+}
+$("rows").addEventListener("change", e => {
+  const tr = e.target.closest("tr"), k = tr.dataset.k, f = e.target.dataset.f;
+  if (f === "action") { map[k] = {action: e.target.value, arg: (A[e.target.value] || {}).def}; draw(); }
+  if (f === "arg") map[k].arg = e.target.value;
+  save();
+});
+$("rows").addEventListener("click", e => {
+  if (e.target.dataset.f !== "del") return;
+  delete map[e.target.closest("tr").dataset.k]; draw(); save();
+});
+function capture(on) { capturing = on; QDKeys.pause(on); $("capture").style.display = on ? "block" : "none"; }
+$("add").onclick = () => { capture(true); $("add").blur(); };
+$("preset").onclick = () => {
+  const p = [["F13", "cw", "CQ TEST DE {MYCALL} {MYCALL}"], ["F14", "cw", "{CALL} 5NN {SERIAL} {BRANCH}"], ["F15", "cw", "TU {MYCALL}"], ["F16", "cw", "{MYCALL}"],
+    ["F17", "cw", "AGN"], ["F18", "cw_stop"], ["F19", "log"], ["F20", "clear"], ["F21", "band_up"], ["F22", "mode_next"], ["F23", "radio_next"], ["F24", "focus"],
+    ["Ctrl+F13", "tune_down", "100"], ["Ctrl+F14", "tune_up", "100"], ["Ctrl+F15", "wpm_down", "2"], ["Ctrl+F16", "wpm_up", "2"]];
+  for (const [k, action, arg] of p) if (!map[k]) map[k] = {action, arg};
+  draw(); save();
+};
+QDKeys.onKey((c, e) => {
+  if (capturing) {
+    e.preventDefault(); e.stopPropagation();
+    if (c === "Escape") return capture(false);
+    capture(false);
+    if (!map[c]) map[c] = {action: "cw", arg: A.cw.def};
+    draw(); save();
+    $("lastdoes").textContent = QDKeys.isPlain(c) ? "Careful: " + c + " is an ordinary typing key. While it is mapped it will no longer type in QSODesk." : "Mapped. Now choose what it does.";
+    const tr = [...$("rows").children].find(r => r.dataset.k === c);
+    if (tr) { tr.classList.add("flash"); tr.scrollIntoView({block: "nearest"}); setTimeout(() => tr.classList.remove("flash"), 1500); }
+    return;
+  }
+  if (e.target.matches && e.target.matches("input,select") && !map[c]) return;
+  $("last").textContent = c;
+  const m = map[c];
+  $("lastdoes").textContent = m ? "Runs: " + (A[m.action] || {}).name + (m.arg ? " (" + m.arg + ")" : "") : "Not mapped.";
+});
+QDKeys.load().then(m => { map = Object.assign({}, m); draw(); });
+</script>
+</body>
+</html>
