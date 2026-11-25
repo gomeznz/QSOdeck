@@ -22,6 +22,18 @@
 .smeter i.lit{background:var(--green)}
 .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .acts button{font-size:13px;padding:5px 10px}
+.ext{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.mt{display:grid;grid-template-columns:52px 1fr 70px;gap:8px;align-items:center;font-size:13px;margin:4px 0}
+.mt span{color:var(--dim)} .mt b{font-family:var(--mono);text-align:right}
+.mt .bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.mt .bar i{display:block;height:100%;width:0;background:var(--green);transition:width .15s}
+.ctl{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.ctl button{font-size:12px;padding:4px 9px;font-family:var(--mono)}
+.ctl select{padding:4px 8px;font-size:13px}
+.pw{display:grid;grid-template-columns:52px 1fr 70px;white-space:nowrap;gap:8px;align-items:center;font-size:13px;margin-top:10px}
+.pw span{color:var(--dim)} .pw b{font-family:var(--mono);text-align:right}
+.pw input{padding:0;width:100%;accent-color:#ffb224}
+.supply{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:4px}
 .found{border:1px solid var(--green);background:rgba(61,220,132,.08);border-radius:12px;padding:10px 14px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(520px,94vw)}
 dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -55,6 +67,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
     <option value="rigctld">Hamlib rigctld on the network</option>
     <option value="sim">Simulated radio (for practice)</option></select></label>
   <label class="field" id="w-usb">USB radio<select id="f-usb"></select></label>
+  <label class="field" id="w-sim">Pretend to be<select id="f-sim"></select></label>
   <div id="w-net" class="row" style="margin-bottom:12px">
     <label class="field" style="flex:1;margin:0">rigctld address<input id="f-host" placeholder="127.0.0.1"></label>
     <label class="field" style="width:110px;margin:0">Port<input id="f-port" placeholder="4532"></label>
@@ -72,10 +85,10 @@ const {$, api, esc} = QD;
 QD.header("radios");
 let D = {radios: [], detected: [], audio_radio: ""}, editing = -1;
 const mine = () => { try { return localStorage.getItem("qsodesk_radio") || ""; } catch (e) { return ""; } };
-const cfgOnly = r => ({id: r.id, name: r.name, source: r.source, path: r.path, model: r.model, host: r.host, port: r.port, audio: r.audio});
+const cfgOnly = r => ({id: r.id, name: r.name, source: r.source, path: r.path, model: r.model, host: r.host, port: r.port, audio: r.audio, sim_model: r.sim_model});
 
 function how(r) {
-  if (r.source === "sim") return "Simulated radio";
+  if (r.source === "sim") return ((D.sim_models || []).find(m => m.key === r.sim_model) || {name: "Simulated radio"}).name;
   if (r.source === "rigctld") return "Hamlib rigctld at " + r.host + ":" + r.port;
   if (r.source === "usb") return "USB radio";
   return "Automatic (USB)";
@@ -84,23 +97,74 @@ function draw() {
   const my = mine() || D.audio_radio;
   $("found").innerHTML = D.detected.map((d, i) => `<div class="found"><b>${esc(d.label)}</b> is plugged in but not set up.` +
     `<button class="primary" data-found="${i}">Add it</button></div>`).join("");
-  $("rigs").innerHTML = D.radios.map((r, i) => {
-    const st = QD.state.radios[r.id] || r.state || {};
-    let bars = "";
-    for (let k = 1; k <= 9; k++) bars += `<i class="${st.smeter != null && k <= st.smeter ? "lit" : ""}" style="height:${5 + k * 1.4}px"></i>`;
-    const tag = !st.connected ? ["NOT CONNECTED", "bad"] : st.simulated ? ["SIMULATED", "sim"] : [st.name, "live"];
-    return `<div class="rig ${r.id === my ? "mine" : ""}">` +
-      `<div class="row"><h2>${esc(r.name)}</h2><div class="spacer"></div><span class="tag ${tag[1]}">${esc(tag[0])}</span></div>` +
-      `<div class="f">${st.freq ? (st.freq / 1e6).toFixed(5) : "-.-----"}<small> MHz</small></div>` +
-      `<div class="m">${esc(st.band || "")} ${esc(st.rmode || "")}<span class="smeter">${bars}</span></div>` +
+  $("rigs").innerHTML = D.radios.map((r, i) =>
+    `<div class="rig ${r.id === my ? "mine" : ""}" data-id="${esc(r.id)}">` +
+      `<div class="row"><h2>${esc(r.name)}</h2><div class="spacer"></div><span class="tag tx" data-f="tx" style="display:none">TX</span><span class="tag" data-f="tag"></span></div>` +
+      `<div class="f"><span data-f="freq">-.-----</span><small> MHz</small></div>` +
+      `<div class="m"><span data-f="mode"></span><span class="smeter" data-f="smeter"></span></div>` +
       `<div class="badges">${r.id === my ? '<span class="badge">This device logs with it</span>' : ""}` +
       `${r.id === D.audio_radio ? '<span class="badge b">Waterfall, CW and FT8</span>' : ""}</div>` +
-      `<div class="muted">${esc(how(r))}</div>` + (st.note ? `<div class="note">${esc(st.note)}</div>` : "") +
+      `<div class="muted">${esc(how(r))}</div><div class="note" data-f="note"></div>` +
+      `<div class="ext" data-f="ext" style="display:none">` +
+        `<div class="mt"><span>Power</span><div class="bar"><i data-f="m-power"></i></div><b data-f="v-power"></b></div>` +
+        `<div class="mt"><span>SWR</span><div class="bar"><i data-f="m-swr"></i></div><b data-f="v-swr"></b></div>` +
+        `<div class="mt"><span>ALC</span><div class="bar"><i data-f="m-alc"></i></div><b data-f="v-alc"></b></div>` +
+        `<div class="supply" data-f="supply"></div>` +
+        `<div class="pw" data-c-wrap="rfpower"><span>RF pwr</span><input type="range" min="1" max="100" data-c="rfpower"><b data-f="v-rfpower"></b></div>` +
+        `<div class="ctl"><select data-c="filter" data-c-wrap="filter" title="Filter width"></select>` +
+          ["nb", "nr", "preamp", "att", "tuner"].map(c => `<button data-c="${c}" data-c-wrap="${c}">${c === "preamp" ? "PRE" : c.toUpperCase()}</button>`).join("") +
+          `<button data-act="tune" data-i="${i}" data-f="tunebtn"></button></div>` +
+      `</div>` +
       `<div class="acts">` +
       (r.id === my ? "" : `<button data-act="mine" data-i="${i}">Log with this one on this device</button>`) +
       (r.id === D.audio_radio ? "" : `<button data-act="listen" data-i="${i}">Use for waterfall, CW and FT8</button>`) +
-      `<button data-act="edit" data-i="${i}">Edit</button></div></div>`;
-  }).join("");
+      `<button data-act="edit" data-i="${i}">Edit</button></div></div>`).join("");
+  for (const r of D.radios) paint(QD.state.radios[r.id] || r.state || {id: r.id});
+}
+
+/* Fill in the live readings for one radio without rebuilding its card,
+   so a slider being dragged is never interrupted. */
+function paint(st) {
+  const card = [...$("rigs").children].find(c => c.dataset.id === st.id); if (!card) return;
+  const el = f => card.querySelector(`[data-f="${f}"]`);
+  const tag = !st.connected ? ["NOT CONNECTED", "bad"] : st.simulated ? ["SIMULATED", "sim"] : [st.name, "live"];
+  el("tag").textContent = tag[0]; el("tag").className = "tag " + tag[1];
+  el("tx").style.display = st.tx ? "" : "none";
+  el("freq").textContent = st.freq ? (st.freq / 1e6).toFixed(5) : "-.-----";
+  el("mode").textContent = (st.band || "out of band") + " " + (st.rmode || "");
+  let bars = "";
+  for (let k = 1; k <= 9; k++) bars += `<i class="${st.smeter != null && k <= st.smeter ? "lit" : ""}" style="height:${5 + k * 1.4}px"></i>`;
+  el("smeter").innerHTML = bars;
+  const x = st.ext;
+  el("note").textContent = st.note || (x && x.note) || "";
+  el("ext").style.display = x ? "" : "none";
+  if (!x) return;
+  const m = x.meters, c = x.controls, caps = x.caps;
+  el("m-power").style.width = Math.min(100, m.power / caps.max_power * 100) + "%";
+  el("v-power").textContent = st.tx ? m.power.toFixed(m.power < 20 ? 1 : 0) + " W" : "-";
+  const swr = m.swr || 1;
+  el("m-swr").style.width = (st.tx ? Math.min(100, (swr - 1) / 2 * 100) : 0) + "%";
+  el("m-swr").style.background = swr >= 2.5 ? "var(--red)" : swr >= 1.8 ? "var(--amber)" : "var(--green)";
+  el("v-swr").textContent = st.tx && m.swr ? m.swr.toFixed(2) : "-";
+  el("m-alc").style.width = (st.tx ? m.alc : 0) + "%";
+  el("m-alc").style.background = m.alc > 65 ? "var(--amber)" : "var(--green)";
+  el("v-alc").textContent = st.tx ? m.alc + "%" : "-";
+  el("supply").textContent = m.vd != null ? m.vd.toFixed(1) + " V   " + m.id.toFixed(1) + " A" : "";
+  card.querySelectorAll("[data-c-wrap]").forEach(w => { w.style.display = caps.can.includes(w.dataset.cWrap) ? "" : "none"; });
+  const pw = card.querySelector('[data-c="rfpower"]');
+  pw.max = caps.max_power;
+  if (document.activeElement !== pw && c.rfpower != null) pw.value = c.rfpower;
+  el("v-rfpower").textContent = (document.activeElement === pw ? pw.value : c.rfpower) + " W";
+  const fs = card.querySelector('[data-c="filter"]');
+  if (document.activeElement !== fs) {
+    const opts = caps.filters.includes(c.filter) || c.filter == null ? caps.filters : caps.filters.concat([c.filter]);
+    fs.innerHTML = opts.map(f => `<option value="${f}" ${f === c.filter ? "selected" : ""}>FIL ${f >= 1000 ? (f / 1000) + "k" : f}</option>`).join("");
+  }
+  for (const n of ["nb", "nr", "att", "tuner"]) card.querySelector(`button[data-c="${n}"]`).className = c[n] ? "on" : "";
+  const pre = card.querySelector('button[data-c="preamp"]');
+  pre.className = c.preamp ? "on" : ""; pre.textContent = c.preamp ? "PRE " + c.preamp : "PRE";
+  el("tunebtn").textContent = st.simulated ? "Test transmit 3 s" : "Tune";
+  el("tunebtn").style.display = st.simulated || caps.tuner ? "" : "none";
 }
 async function load() { try { D = await api("/api/radios"); draw(); } catch (e) { /* retry on next event */ } }
 async function saveAll(list) {
@@ -112,9 +176,10 @@ async function saveAll(list) {
 function showFields() {
   const s = $("f-source").value;
   $("w-usb").style.display = s === "usb" ? "" : "none";
+  $("w-sim").style.display = s === "sim" ? "" : "none";
   $("w-net").style.display = s === "rigctld" ? "" : "none";
   $("w-audio").style.display = s === "sim" ? "none" : "";
-  $("dlg-note").textContent = s === "sim" ? "A pretend radio with pretend signals. Handy for practising, or for a station whose radio has no computer control."
+  $("dlg-note").textContent = s === "sim" ? "A pretend radio with pretend signals, controls and meters. Its antenna is resonant mid-band, so SWR rises towards the band edges."
     : s === "rigctld" ? "For any radio Hamlib supports: run rigctld for it, here or on another Pi, and give its address."
     : s === "usb" && !$("f-usb").options.length ? "No supported USB radio is plugged in right now. Plug it in and reopen this window." : "";
 }
@@ -126,6 +191,7 @@ function open(i, preset) {
   const opts = D.detected.map(d => [d.path, d.label, d.model]);
   if (r.path && !opts.some(o => o[0] === r.path)) opts.unshift([r.path, (r.name || "This radio") + " (currently set)", r.model]);
   $("f-usb").innerHTML = opts.map(o => `<option value="${esc(o[0])}" data-model="${o[2]}" ${o[0] === r.path ? "selected" : ""}>${esc(o[1])}</option>`).join("");
+  $("f-sim").innerHTML = (D.sim_models || []).map(m => `<option value="${m.key}" ${m.key === (r.sim_model || "generic") ? "selected" : ""}>${esc(m.name)}</option>`).join("");
   $("f-host").value = r.host || "127.0.0.1"; $("f-port").value = r.port || 4532; $("f-audio").value = r.audio || "";
   $("f-remove").style.display = i >= 0 && D.radios.length > 1 ? "" : "none";
   showFields(); $("dlg").showModal(); $("f-name").focus();
@@ -137,7 +203,7 @@ $("f-save").onclick = async () => {
   const usb = $("f-usb").selectedOptions[0];
   const r = {id: editing >= 0 ? D.radios[editing].id : "", name: $("f-name").value.trim() || "Radio " + (D.radios.length + (editing >= 0 ? 0 : 1)),
     source: $("f-source").value, path: usb ? usb.value : "", model: usb ? Number(usb.dataset.model) : 0,
-    host: $("f-host").value.trim(), port: Number($("f-port").value) || 4532, audio: $("f-audio").value.trim()};
+    host: $("f-host").value.trim(), port: Number($("f-port").value) || 4532, audio: $("f-audio").value.trim(), sim_model: $("f-sim").value};
   if (r.source === "usb" && !r.path) { $("dlg-note").textContent = "Choose a USB radio, or pick another connection."; return; }
   const list = D.radios.slice();
   if (editing >= 0) list[editing] = r; else list.push(r);
@@ -155,11 +221,22 @@ $("rigs").addEventListener("click", async e => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const r = D.radios[b.dataset.i];
   if (b.dataset.act === "edit") return open(Number(b.dataset.i));
+  if (b.dataset.act === "tune") { try { await api("/api/radio/tune", {radio: r.id}); } catch (err) { note(b, err.message); } return; }
   if (b.dataset.act === "mine") { try { localStorage.setItem("qsodesk_radio", r.id); } catch (err) {} draw(); }
   if (b.dataset.act === "listen") { await api("/api/radios/listen", {id: r.id}); load(); }
 });
 
-QD.on("anyradio", draw); QD.on("radios", load);
+/* radio controls on each card */
+function note(el, text) { const n = el.closest(".rig").querySelector('[data-f="note"]'); n.textContent = text; }
+async function setCtl(el, body) {
+  try { await api("/api/radio/set", Object.assign({radio: el.closest(".rig").dataset.id, name: el.dataset.c}, body)); }
+  catch (err) { note(el, err.message); }
+}
+$("rigs").addEventListener("click", e => { const b = e.target.closest("button[data-c]"); if (b) setCtl(b, {}); });
+$("rigs").addEventListener("change", e => { const c = e.target.closest("[data-c]"); if (c && c.tagName !== "BUTTON") { setCtl(c, {value: Number(c.value)}); c.blur(); } });
+$("rigs").addEventListener("input", e => { const c = e.target.closest('input[data-c="rfpower"]'); if (c) c.closest(".rig").querySelector('[data-f="v-rfpower"]').textContent = c.value + " W"; });
+
+QD.on("anyradio", paint); QD.on("radios", load);
 load(); setInterval(load, 15000);
 </script>
 </body>

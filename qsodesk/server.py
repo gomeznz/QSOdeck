@@ -19,7 +19,7 @@ from .spaceweather import SpaceWeather
 from .store import Store, adif_record
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-VERSION = "0.6"
+VERSION = "0.7"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
          "/transceivers": "transceivers.html", "/keypad": "keypad.html", "/reports": "reports.html",
          "/waterfall": "waterfall.html",
@@ -65,7 +65,9 @@ class App:
                 "audio_device": cfg.get("audio", "")}
 
     def radios(self):
+        from .radio import SIM_MODELS
         return {"radios": self.hub.list(), "detected": self.hub.detected(),
+                "sim_models": [{"key": k, "name": v["name"]} for k, v in SIM_MODELS.items()],
                 "audio_radio": self.radio.id}
 
     # ---- CW ---------------------------------------------------------------
@@ -75,7 +77,9 @@ class App:
         if not text:
             return {"error": "Nothing to send"}
         if self.radio.state.get("simulated", True):
-            self.audio.inject(cw_samples(text, wpm, 700, 9000))   # hear it on the simulator
+            samples = cw_samples(text, wpm, 700, 9000)
+            self.audio.inject(samples)                            # hear it on the simulator
+            self.radio.tx_for(len(samples) / 12000.0)             # and see it on the meters
         else:
             self.radio.send_morse(text, wpm)
         return {"ok": True, "text": text, "wpm": wpm}
@@ -393,6 +397,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({"error": "Give the event a name"}, status=400)
             app.store.create_event(name, b.get("contest") or "general")
             app.broadcast("log", {})
+            return self.send({"ok": True})
+        if path == "/api/radio/set":
+            try:
+                v = app.rig(b.get("radio")).adjust(b.get("name", ""), b.get("value"), b.get("delta"))
+            except Exception as exc:
+                return self.send({"error": str(exc)}, status=400)
+            return self.send({"ok": True, "value": v})
+        if path == "/api/radio/tune":
+            try:
+                app.rig(b.get("radio")).tune_carrier()
+            except Exception as exc:
+                return self.send({"error": str(exc)}, status=502)
             return self.send({"ok": True})
         if path == "/api/radio/step":
             try:

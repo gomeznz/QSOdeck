@@ -267,6 +267,45 @@ class Transceivers(unittest.TestCase):
             self.assertEqual(RadioHub(st, seen.append).list()[0]["name"], "40 m station")   # survives restart
 
 
+class SimulatedRigs(unittest.TestCase):
+    def test_ic7300(self):
+        from qsodesk.radio import SimRadio
+        r = SimRadio("ic7300")
+        st = r.poll()
+        self.assertEqual((r.name, st["tx"], st["ext"]["controls"]["rfpower"]), ("IC-7300 (simulated)", False, 100))
+        self.assertEqual(st["ext"]["meters"]["power"], 0)
+        r.set_freq(3700000)                       # middle of 80 m: resonant
+        r.set_ptt(True)
+        m = r.poll()["ext"]["meters"]
+        self.assertTrue(95 <= m["power"] <= 100 and m["swr"] < 1.3 and m["id"] > 15 and m["vd"] < 13.5)
+        r.set_freq(3505000)                       # band edge: high SWR, power folds back
+        m = r.poll()["ext"]["meters"]
+        self.assertTrue(m["swr"] > 3 and m["power"] < 70)
+        r.set_control("tuner", True)              # the tuner brings it back
+        m = r.poll()["ext"]["meters"]
+        self.assertTrue(m["swr"] < 1.4 and m["power"] > 90)
+        r.set_control("rfpower", 25)
+        self.assertTrue(23 <= r.poll()["ext"]["meters"]["power"] <= 25)
+        r.set_freq(5000000)                       # not an amateur band: no transmit
+        st = r.poll()
+        self.assertFalse(st["tx"])
+        self.assertIn("inhibited", st["ext"]["note"])
+        with self.assertRaises(IOError):
+            r.set_freq(145000000)                 # an IC-7300 has no 2 m
+        r.set_mode("CW")
+        self.assertEqual(r.poll()["ext"]["controls"]["filter"], 500)
+
+    def test_ic705(self):
+        from qsodesk.radio import SimRadio
+        r = SimRadio("ic705")
+        r.set_freq(145000000)                     # the 705 does cover 2 m
+        r.set_control("rfpower", 50)
+        self.assertEqual(r.poll()["ext"]["controls"]["rfpower"], 10)      # 10 W radio
+        self.assertNotIn("tuner", r.poll()["ext"]["caps"]["can"])
+        r.tx_for(5)
+        self.assertTrue(r.poll()["tx"])
+
+
 class Storage(unittest.TestCase):
     def entry(self, n, band="80m"):
         return {"uuid": "u%d" % n, "event": "Practice - Jock White", "contest": "jwfd",
