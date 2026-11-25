@@ -93,6 +93,63 @@ class TransTasman(unittest.TestCase):
         self.assertEqual(self.c.serial_scope("80m", {"tt_serial_per_band": "1"}), "80m")
 
 
+class MoreContests(unittest.TestCase):
+    def test_sangster(self):
+        c, s = contests.get("sangster"), {"branch": "27"}
+        log = [q(1, "ZL2AB", "80m", "CW", T0 + 60, "12"),          # 5 pts, branch 12
+               q(2, "ZL2CD", "80m", "CW", T0 + 90, "12"),          # 5 pts
+               q(3, "VK3XX", "80m", "CW", T0 + 120, ""),           # overseas: 10 pts
+               q(4, "ZL4ME", "80m", "CW", T0 + 150, "27"),         # own branch: points only
+               q(5, "ZL2AB", "80m", "CW", T0 + 200, "12"),         # dupe this half hour
+               q(6, "ZL2AB", "80m", "CW", T0 + 1800 + 10, "12")]   # next half hour
+        sc = c.score(log, s)
+        self.assertEqual((sc["points"], sc["mults"], sc["total"]), (30, 1, 30))
+        self.assertEqual(c.check(log, "ZL2AB", "80m", "CW", T0 + 1800 + 60, s)["status"], "dupe")
+        self.assertEqual(c.check(log, "ZL2AB", "80m", "PH", T0 + 3700, s)["status"], "invalid")
+        two = [q(1, "ZL2AB", "80m", "CW", T0 + 1790, "12")]          # end of one period...
+        self.assertEqual(c.check(two, "ZL2AB", "80m", "CW", T0 + 1810, s)["status"], "invalid")
+        self.assertNotEqual(c.check(two, "ZL2AB", "80m", "CW", T0 + 1790 + 301, s)["status"], "invalid")
+        self.assertEqual(c.check(log, "ZL3NEW", "80m", "CW", T0 + 4000, s)["status"], "new")
+
+    def test_memorial(self):
+        c = contests.get("memorial")
+        log = [q(1, "ZL2AB", "80m", "PH", T0 + 60), q(2, "ZL2CD", "80m", "PH", T0 + 90),
+               q(3, "ZL2AB", "80m", "CW", T0 + 120), q(4, "VK3XX", "80m", "CW", T0 + 150),
+               q(5, "W1AW", "80m", "CW", T0 + 180)]
+        sc = c.score(log, {})
+        self.assertEqual(sc["points"], 1 + 1 + 2 + 2 + 2)
+        self.assertEqual(sc["mults"], 3)                           # ZL2 on PH, ZL2 on CW, VK3 on CW
+        self.assertEqual(sc["total"], 8 * 3)
+        self.assertEqual(c.check(log, "ZL2AB", "80m", "PH", T0 + 200, {})["status"], "dupe")
+        self.assertEqual(c.check(log[:1], "ZL2AB", "80m", "CW", T0 + 100, {})["status"], "invalid")  # consecutive
+
+    def test_sprint(self):
+        c = contests.get("sprint")
+        log = [q(1, "ZL2AB", "80m", "CW", T0 + 60, "12"), q(2, "ZL2AB", "80m", "PH", T0 + 2000, "12")]
+        self.assertEqual(c.score(log, {})["total"], 2)
+        self.assertEqual(c.check(log, "ZL2AB", "80m", "CW", T0 + 70, {})["status"], "dupe")
+        self.assertEqual(c.check(log, "ZL2AB", "80m", "DIG", T0 + 4000, {})["status"], "ok")
+        self.assertIsNone(c.period(T0))
+
+    def test_reports(self):
+        from qsodesk import reports
+        c = contests.get("jwfd")
+        log = [dict(q(i, "ZL2A%s" % chr(65 + i % 5), "80m" if i % 2 else "40m", "PH", T0 + i * 400, "%02d" % (i % 4 + 1)),
+                    operator="ZL4XX", station="S1", rst_sent="59", rst_rcvd="59", name="", notes="",
+                    serial_rcvd="001", event="E") for i in range(12)]
+        r = reports.contest_report({"name": "E", "contest": "jwfd"}, c, log, {"branch": "27"})
+        self.assertEqual(r["count"], 12)
+        self.assertEqual(r["score"]["total"], c.score(log, {"branch": "27"})["total"])
+        self.assertEqual(sum(p["count"] for p in r["periods"]), 12)
+        self.assertEqual(len(r["mults"]), r["score"]["mults"])
+        self.assertEqual(r["best_hour"], 10)
+        p = reports.personal_report(log, "All")
+        self.assertEqual((p["count"], p["unique_calls"], p["prefix_total"]), (12, 5, 1))
+        self.assertEqual(p["top_calls"][0]["count"], 3)
+        self.assertEqual(len(reports.callsign_history(log, "zl2aa/p")), 3)
+        self.assertEqual(len(contests.catalogue()), 10)
+
+
 class FT8Messages(unittest.TestCase):
     def test_parse(self):
         from qsodesk import ft8

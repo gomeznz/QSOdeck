@@ -10,7 +10,7 @@ import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import contests
+from . import contests, reports
 from .audio import AudioEngine, cw_samples
 from .ft8 import FT8
 from .radio import RadioHub
@@ -18,9 +18,9 @@ from .spaceweather import SpaceWeather
 from .store import Store, adif_record
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-VERSION = "0.4"
+VERSION = "0.5"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
-         "/transceivers": "transceivers.html", "/keypad": "keypad.html",
+         "/transceivers": "transceivers.html", "/keypad": "keypad.html", "/reports": "reports.html",
          "/waterfall": "waterfall.html",
          "/cw": "cw.html", "/ft8": "ft8.html"}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -119,7 +119,7 @@ class App:
         live = self.store.qsos(ev["name"])
         out = c.check(live, p.get("call", ""), band, mode, time.time(), s)
         typed = p.get("exch", "")
-        if typed and c.key == "jwfd" and out["status"] in ("ok", "new"):
+        if typed and hasattr(c, "is_new_mult") and out["status"] in ("ok", "new"):
             if c.is_new_mult(live, typed, band, mode, s):
                 out["status"] = "mult"
                 out["msg"] = "New multiplier - branch %s on %s %s" % (
@@ -139,7 +139,7 @@ class App:
             ts = now
         band = b.get("band") or rs["band"]
         exch = (b.get("exch") or "").strip()
-        if c.key == "jwfd":
+        if c.branch_exchange:
             exch = contests.norm_branch(exch)
         sent = b.get("serial_sent")
         q = {
@@ -158,6 +158,32 @@ class App:
         row, saved, changed = self.store.add(q, c.serial_scope(band, s))
         self.broadcast("log", {})
         return {"qso": row, "saved": saved, "serial_changed": changed}
+
+    # ---- reports ----------------------------------------------------------
+    def report(self, p):
+        s = self.store.settings()
+        scope = p.get("scope") or "event"
+        if scope == "event":
+            ev = self.store.event(p.get("event")) or self.store.event()
+            c = contests.get(ev["contest"])
+            qsos = self.store.qsos(ev["name"])
+            if c.key == "general":
+                return reports.personal_report(qsos, ev["name"])
+            return reports.contest_report(ev, c, qsos, s)
+        year = int(p["year"]) if str(p.get("year", "")).isdigit() else None
+        if scope == "personal":
+            return reports.personal_report(self.store.all_qsos("general"), "Personal contacts", year)
+        return reports.personal_report(self.store.all_qsos(), "Every contact in the log", year)
+
+    def report_index(self):
+        evs = []
+        for e in self.store.events():
+            c = contests.get(e["contest"])
+            evs.append({"name": e["name"], "contest": c.key, "contest_name": c.name,
+                        "count": len(self.store.qsos(e["name"]))})
+        return {"events": evs, "catalogue": contests.catalogue(),
+                "calendar_url": contests.CALENDAR_URL,
+                "current": self.store.settings().get("current_event")}
 
     # ---- exports ----------------------------------------------------------
     def export_adif(self, event):
@@ -217,18 +243,22 @@ class App:
         me = s.get("callsign", "") or "NOCALL"
         modes = {"PH": "PH", "CW": "CW", "DIG": "RY"}
         out = ["START-OF-LOG: 3.0", "CREATED-BY: QSODesk " + VERSION,
-               "CONTEST: " + ("TRANS-TASMAN" if c.key == "tt" else c.key.upper()),
+               "CONTEST: " + {"tt": "TRANS-TASMAN", "memorial": "NZART-MEMORIAL",
+                              "sangster": "SANGSTER-SHIELD", "sprint": "ZL-SPRINT"}.get(c.key, c.key.upper()),
                "CALLSIGN: " + me, "CATEGORY-OPERATOR: ", "CATEGORY-BAND: ALL",
                "CATEGORY-MODE: ", "CATEGORY-POWER: ", "CATEGORY-TRANSMITTER: ",
                "CLAIMED-SCORE: %d" % sc["total"],
                "OPERATORS: " + (s.get("operator", "") or me), "NAME: ", "EMAIL: "]
         for q in live:
             t = time.gmtime(q["ts"])
-            out.append("QSO: %5d %s %s %s %-10s %-3s %03d %-10s %-3s %s" % (
+            sent = [q["rst_sent"]] + (["%03d" % (q["serial_sent"] or 0)] if c.has_serial else [])
+            if c.branch_exchange:
+                sent.append(contests.norm_branch(s.get("branch", "")) or "00")
+            rcvd = [x for x in (q["rst_rcvd"], q["serial_rcvd"], q["exch"]) if x]
+            out.append("QSO: %5d %s %s %s %-10s %-12s %-10s %s" % (
                 (q["freq"] or 0) // 1000, modes.get(q["mode"], "PH"),
                 time.strftime("%Y-%m-%d", t), time.strftime("%H%M", t), me,
-                q["rst_sent"], q["serial_sent"] or 0, q["call"], q["rst_rcvd"],
-                q["serial_rcvd"]))
+                " ".join(sent), q["call"], " ".join(rcvd)))
         out.append("END-OF-LOG:")
         return ("\n".join(out) + "\n").encode()
 
@@ -271,6 +301,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(fh.read(), TYPES[ext])
         if path == "/api/audio":
             return self.audio_stream()
+        if path == "/api/report":
+            return self.send(app.report(p))
+        if path == "/api/reports":
+            return self.send(app.report_index())
+        if path == "/api/callsign":
+            return self.send(reports.callsign_history(app.store.all_qsos(), p.get("call", "")))
+        if path == "/export/adif-all":
+            only = "general" if p.get("scope") == "personal" else None
+            out = b"QSODesk export\n<ADIF_VER:5>3.1.4 <PROGRAMID:7>QSODesk <EOH>\n"
+            for q in app.store.all_qsos(only):
+                out += adif_record(q, app.store.settings())
+            return self.send(out, "text/plain", filename="qsodesk-%s.adi" % (p.get("scope") or "all"))
         if path == "/api/spaceweather":
             return self.send(app.spacewx.get())
         if path == "/api/ft8":

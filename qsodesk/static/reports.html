@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QSODesk - Reports</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/qd.css">
+<style>
+.pickbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.pickbar select{max-width:340px}
+h1{font-size:26px;margin:0}
+.lead{color:var(--dim);margin:4px 0 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:14px 0}
+.tile{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.tile b{display:block;font-family:var(--mono);font-size:28px;line-height:1.1}
+.tile span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+.tile.hi b{color:var(--amber)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+table.t td,table.t th{padding:5px 8px;text-align:left;border-bottom:1px solid #1c2531}
+table.t th{color:var(--dim);font-weight:400;font-size:11px;text-transform:uppercase;letter-spacing:.8px}
+table.t td.n,table.t th.n{text-align:right;font-family:var(--mono)}
+.mono{font-family:var(--mono)}
+.hb{display:grid;grid-template-columns:90px 1fr 46px;gap:8px;align-items:center;margin:5px 0;font-size:14px}
+.hb i{display:block;height:14px;border-radius:4px;background:var(--amber);min-width:2px}
+.hb b{font-family:var(--mono);text-align:right;font-weight:600}
+.vb{display:flex;align-items:flex-end;gap:3px;height:140px;margin-top:6px}
+.vb div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0;height:100%}
+.vb i{display:block;width:100%;background:var(--blue);border-radius:3px 3px 0 0;min-height:1px}
+.vb small{font-size:10px;color:var(--dim);margin-top:3px;white-space:nowrap;font-family:var(--mono)}
+.vb em{font-style:normal;font-size:10px;font-family:var(--mono);color:var(--text)}
+.cat td a{color:var(--blue);text-decoration:none}
+.yes{color:var(--green);font-weight:600} .no{color:var(--dim)}
+.links a{color:var(--blue);text-decoration:none;border:1px solid var(--line);border-radius:7px;padding:4px 10px;font-size:13px;display:inline-block;margin:0 6px 6px 0}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel2:#fff;--line:#bbb;--text:#000;--dim:#444;--amber:#000;--blue:#1a4fa0;--green:#0a6b2e}
+  header,.pickbar,.noprint,.wf-read{display:none!important}
+  .panel{break-inside:avoid;border-color:#bbb}
+  .hb i{background:#555}.vb i{background:#555}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr"></header>
+  <div class="pickbar">
+    <label class="muted">Report on <select id="pick"></select></label>
+    <select id="year" style="display:none"></select>
+    <div class="spacer"></div>
+    <input id="lookup" placeholder="Look up a callsign" style="width:190px;font-family:var(--mono);text-transform:uppercase">
+    <button onclick="window.print()">Print / save as PDF</button>
+  </div>
+  <div id="out"></div>
+</div>
+<script src="/static/qd.js"></script>
+<script src="/static/keys.js"></script>
+<script>
+"use strict";
+const {$, api, esc, pad} = QD;
+QD.header("reports");
+let IDX = null;
+const dt = ts => { const d = new Date(ts * 1000); return d.toLocaleDateString("en-NZ", {day: "numeric", month: "short", year: "numeric"}) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const hm = ts => { const d = new Date(ts * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const tile = (v, label, hi) => `<div class="tile ${hi ? "hi" : ""}"><b>${v}</b><span>${label}</span></div>`;
+function hbars(rows, title) {
+  if (!rows.length) return "";
+  const max = Math.max(...rows.map(r => r.count));
+  return `<div class="panel"><h3>${title}</h3>` + rows.map(r => `<div class="hb"><span class="mono">${esc(r.label)}</span><i style="width:${r.count / max * 100}%"></i><b>${r.count}</b></div>`).join("") + `</div>`;
+}
+function vbars(rows, title, note) {
+  if (!rows.length) return "";
+  const max = Math.max(1, ...rows.map(r => r.count)), every = Math.ceil(rows.length / 14);
+  return `<div class="panel"><h3>${title}</h3><div class="vb">` + rows.map((r, i) => `<div><em>${r.count || ""}</em><i style="height:${r.count / max * 100}%"></i><small>${i % every ? "&nbsp;" : esc(r.label)}</small></div>`).join("") +
+    `</div>${note ? `<p class="muted" style="margin:8px 0 0">${note}</p>` : ""}</div>`;
+}
+const span = r => r.first ? dt(r.first) + " to " + dt(r.last) : "no contacts yet";
+
+function contest(r) {
+  const c = r.contest, s = r.score, ev = encodeURIComponent(r.title);
+  const exNames = {sheets: "Log sheets (CSV)", summary: "Summary sheet", cabrillo: "Cabrillo log"};
+  let h = `<div class="panel"><h1>${esc(r.title)}</h1><p class="lead">${esc(c.name)} · ${esc(r.station.callsign || "no callsign set")}` +
+    `${r.station.branch ? " · Branch " + esc(r.station.branch) : ""} · ${span(r)}</p>` +
+    `<div class="tiles">${tile(s.total.toLocaleString(), "Claimed score", 1)}${tile(s.count, "Valid contacts")}${tile(s.points, "Contact points")}${tile(s.mults, "Multipliers")}` +
+    `${tile(r.best_hour, "Best hour")}${tile(r.unique_calls, "Different stations")}${tile(r.dupes, "Dupes")}${tile(r.no_points, "No points")}</div>` +
+    `<div class="links noprint"><a href="/export/adif?event=${ev}">ADIF</a>` + c.exports.map(x => `<a href="/export/${x}?event=${ev}">${exNames[x]}</a>`).join("") +
+    (c.rules_url ? `<a href="${esc(c.rules_url)}" target="_blank" rel="noopener">Contest rules ↗</a>` : "") + `</div>` +
+    (c.submit ? `<p class="muted" style="margin:6px 0 0"><b>Sending it in:</b> ${esc(c.submit)} Check the rules page for the current address and deadline.</p>` : "") + `</div>`;
+  h += `<div class="cols">`;
+  if (s.lines.length) h += `<div class="panel"><h3>Score breakdown</h3><table class="t"><tr><th></th><th class="n">Contacts</th><th class="n">Points</th><th class="n">Mults</th></tr>` +
+    s.lines.map(l => `<tr><td>${l.label === "block" ? "Block from " + hm(l.start) : esc(l.label)}</td><td class="n">${l.count}</td><td class="n">${l.points}</td><td class="n">${l.mults}</td></tr>`).join("") +
+    `<tr><td><b>Total</b></td><td class="n"><b>${s.count}</b></td><td class="n"><b>${s.points}</b></td><td class="n"><b>${s.mults}</b></td></tr></table></div>`;
+  h += vbars(r.periods.map(p => ({label: hm(p.start), count: p.count})), r.period_seconds === 3600 ? "Contacts per hour" : "Contacts per period");
+  h += hbars(r.bands, "By band") + hbars(r.modes, "By mode");
+  if (r.operators.length > 1 || r.stations.length > 1) h += hbars(r.operators, "By operator") + hbars(r.stations, "By station");
+  h += `</div>`;
+  if (r.mults.length) h += `<div class="panel"><h3>Multipliers claimed (${r.mults.length})</h3><table class="t"><tr><th>Multiplier</th><th>Station</th><th>Band</th><th>Mode</th><th>Time</th></tr>` +
+    r.mults.map(m => `<tr><td>${esc(m.what)}</td><td class="mono"><b>${esc(m.call)}</b></td><td>${esc(m.band)}</td><td>${esc(m.mode)}</td><td class="mono">${dt(m.ts)}</td></tr>`).join("") + `</table></div>`;
+  return h;
+}
+
+function personal(r, scope) {
+  let h = `<div class="panel"><h1>${esc(r.title)}${r.year ? " · " + r.year : ""}</h1><p class="lead">${span(r)}</p>` +
+    `<div class="tiles">${tile(r.count.toLocaleString(), "Contacts", 1)}${tile(r.unique_calls, "Different stations")}${tile(r.prefix_total, "Prefixes")}` +
+    `${tile(r.bands.length, "Bands")}${tile(r.modes.length, "Modes")}</div>` +
+    `<div class="links noprint">${scope === "event" ? `<a href="/export/adif?event=${encodeURIComponent(r.title)}">ADIF</a>` : `<a href="/export/adif-all?scope=${scope}">ADIF of these contacts</a>`}</div></div>`;
+  if (!r.count) return h + `<div class="panel"><p class="muted">Nothing logged here yet. Start a "General logging" event on the Logger for everyday contacts.</p></div>`;
+  h += `<div class="cols">` + vbars(r.months.map(m => ({label: m.label.slice(2), count: m.count})), "Contacts by month") +
+    hbars(r.bands, "By band") + hbars(r.modes, "By mode") + hbars(r.areas, "ZL and VK call areas") +
+    `<div class="panel"><h3>Most worked</h3><table class="t"><tr><th>Station</th><th class="n">Contacts</th><th>Last</th></tr>` +
+    r.top_calls.map(c => `<tr><td class="mono"><b><a href="#" data-call="${esc(c.label)}" style="color:inherit">${esc(c.label)}</a></b></td><td class="n">${c.count}</td><td class="mono">${dt(c.last)}</td></tr>`).join("") + `</table></div>` +
+    hbars(r.prefixes.slice(0, 15), r.prefix_total > 15 ? "Prefixes worked (top 15 of " + r.prefix_total + ")" : "Prefixes worked");
+  if (r.events.length > 1) h += hbars(r.events, "By event");
+  h += `</div><div class="panel"><h3>Latest contacts</h3><table class="t"><tr><th>When</th><th>Station</th><th>Band</th><th>Mode</th><th>Sent</th><th>Rcvd</th><th>Name</th><th>Notes</th></tr>` +
+    r.recent.map(q => `<tr><td class="mono">${dt(q.ts)}</td><td class="mono"><b>${esc(q.call)}</b></td><td>${esc(q.band)}</td><td>${esc(q.mode)}</td><td class="mono">${esc(q.rst_sent)}</td><td class="mono">${esc(q.rst_rcvd)}</td><td>${esc(q.name)}</td><td>${esc(q.notes)}</td></tr>`).join("") + `</table></div>`;
+  return h;
+}
+
+function catalogue() {
+  return `<div class="panel noprint"><h3>NZART contests and their rules</h3><table class="t cat"><tr><th>Contest</th><th>When</th><th>In QSODesk</th><th>Rules</th></tr>` +
+    IDX.catalogue.map(c => `<tr><td>${esc(c.name)}</td><td class="muted">${esc(c.when || "")}</td><td class="${c.key ? "yes" : "no"}">${c.key ? "Scored" : "Log as General"}</td>` +
+      `<td><a href="${esc(c.url)}" target="_blank" rel="noopener">Rules ↗</a></td></tr>`).join("") +
+    `</table><p class="muted" style="margin:10px 0 0">Dates change each year: see the <a href="${esc(IDX.calendar_url)}" target="_blank" rel="noopener" style="color:var(--blue)">NZART contest calendar ↗</a>. ` +
+    `"Scored" contests have their own entry line, dupe checking and score. Start one with New event on the Logger.</p></div>`;
+}
+
+async function show() {
+  const v = $("pick").value, [scope, name] = v.startsWith("event:") ? ["event", v.slice(6)] : [v, ""];
+  $("year").style.display = scope === "event" ? "none" : "";
+  let r;
+  try { r = await api(`/api/report?scope=${scope}&event=${encodeURIComponent(name)}&year=${$("year").value}`); }
+  catch (e) { $("out").innerHTML = `<div class="panel">${esc(e.message)}</div>`; return; }
+  if (r.kind === "personal" && scope !== "event") {
+    const cur = $("year").value;
+    $("year").innerHTML = `<option value="">All years</option>` + r.years.map(y => `<option ${String(y) === cur ? "selected" : ""}>${y}</option>`).join("");
+  }
+  $("out").innerHTML = (r.kind === "contest" ? contest(r) : personal(r, scope)) + catalogue();
+}
+async function lookup(call) {
+  call = call.trim().toUpperCase(); if (!call) return show();
+  const rows = await api("/api/callsign?call=" + encodeURIComponent(call));
+  $("out").innerHTML = `<div class="panel"><h1>${esc(call)}</h1><p class="lead">${rows.length ? rows.length + " contact" + (rows.length === 1 ? "" : "s") + " in the log" : "Not in the log"}</p>` +
+    (rows.length ? `<table class="t" style="margin-top:12px"><tr><th>When</th><th>Call</th><th>Band</th><th>Mode</th><th>Sent</th><th>Received</th><th>Name</th><th>Event</th></tr>` +
+      rows.map(q => `<tr><td class="mono">${dt(q.ts)}</td><td class="mono"><b>${esc(q.call)}</b></td><td>${esc(q.band)}</td><td>${esc(q.mode)}</td><td class="mono">${esc(q.rst_sent)}</td>` +
+        `<td class="mono">${esc([q.rst_rcvd, q.serial_rcvd, q.exch].filter(Boolean).join(" "))}</td><td>${esc(q.name)}</td><td class="muted">${esc(q.event)}</td></tr>`).join("") + `</table>` : "") +
+    `<p class="noprint" style="margin:12px 0 0"><button id="back">Back to the report</button></p></div>`;
+  $("back").onclick = () => { $("lookup").value = ""; show(); };
+}
+$("pick").onchange = () => { $("year").value = ""; show(); };
+$("year").onchange = show;
+$("lookup").addEventListener("keydown", e => { if (e.key === "Enter") lookup($("lookup").value); });
+$("out").addEventListener("click", e => { const a = e.target.closest("a[data-call]"); if (a) { e.preventDefault(); $("lookup").value = a.dataset.call; lookup(a.dataset.call); } });
+
+(async () => {
+  IDX = await api("/api/reports");
+  const want = new URLSearchParams(location.search).get("event") || IDX.current;
+  $("pick").innerHTML = `<optgroup label="Personal"><option value="personal">Personal contacts (all General logging)</option><option value="all">Every contact in the log</option></optgroup>` +
+    `<optgroup label="Events">` + IDX.events.map(e => `<option value="event:${esc(e.name)}" ${e.name === want ? "selected" : ""}>${esc(e.name)} (${esc(e.contest_name)}, ${e.count})</option>`).join("") + `</optgroup>`;
+  show();
+})();
+QD.on("log", () => { if (!$("lookup").value) show(); });
+</script>
+</body>
+</html>

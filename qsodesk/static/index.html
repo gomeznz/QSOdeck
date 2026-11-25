@@ -148,9 +148,10 @@ dialog h2{margin:0 0 12px;font-size:18px}
 <div class="wrap">
   <header>
     <div class="logo">QSO<span>Desk</span></div>
-    <nav class="topnav"><a class="on" href="/">Logger</a><a href="/dashboard">Dashboard</a><a href="/transceivers">Radios</a><a href="/waterfall">Waterfall</a><a href="/cw">CW</a><a href="/ft8">FT8</a><a href="/keypad">Keypad</a></nav>
+    <nav class="topnav"><a class="on" href="/">Logger</a><a href="/dashboard">Dashboard</a><a href="/transceivers">Radios</a><a href="/waterfall">Waterfall</a><a href="/cw">CW</a><a href="/ft8">FT8</a><a href="/keypad">Keypad</a><a href="/reports">Reports</a></nav>
     <div class="me" id="me"></div>
     <select id="eventsel" title="Event"></select>
+    <a id="ruleslink" target="_blank" rel="noopener" style="display:none;color:var(--blue);font-size:13px;text-decoration:none">Rules &#8599;</a>
     <button id="newevent">New event</button>
     <div class="spacer"></div>
     <button id="opensettings">Settings</button>
@@ -258,6 +259,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
   <div class="form">
     <label class="wide">Type<select id="ev-contest"></select></label>
     <label class="wide">Name<input id="ev-name" placeholder="e.g. Jock White 2027"></label>
+    <p class="muted wide" id="ev-info" style="grid-column:1/3;margin:0"></p>
   </div>
   <div class="actions"><button id="ev-cancel">Cancel</button><button class="primary" id="ev-save">Start</button></div>
 </dialog>
@@ -425,8 +427,10 @@ function render() {
   // exports
   const ev = encodeURIComponent(S.event.name);
   let ex = `<a href="/export/adif?event=${ev}">ADIF</a> `;
-  if (c.key === "jwfd") ex += `<a href="/export/sheets?event=${ev}">Log sheets</a> <a href="/export/summary?event=${ev}">Summary</a> `;
-  if (c.key === "tt") ex += `<a href="/export/cabrillo?event=${ev}">Cabrillo</a> <a href="/export/summary?event=${ev}">Summary</a> `;
+  const exNames = {sheets: "Log sheets", summary: "Summary", cabrillo: "Cabrillo"};
+  for (const x of c.exports) ex += `<a href="/export/${x}?event=${ev}">${exNames[x]}</a> `;
+  ex += `<a href="/reports?event=${ev}">Report</a> `;
+  $("ruleslink").style.display = c.rules_url ? "" : "none"; $("ruleslink").href = c.rules_url || "#";
   ex += `<a href="/export/journal">Journal</a>`;
   $("exports").innerHTML = ex;
 
@@ -548,7 +552,11 @@ async function submit() {
   finally { submit.busy = false; }
   if ($("call").value.trim().toUpperCase() !== call) return;
   if (c.fields.includes("serial") && !$("srx").value.trim()) { $("msg").textContent = "Their serial number?"; $("srx").focus(); return; }
-  if (c.key === "jwfd" && !$("exch").value.trim()) { $("msg").textContent = "Their branch number? (00 for a home station)"; $("exch").focus(); return; }
+  const needExch = c.exch_required === "always" || (c.exch_required === "zl" && /^Z[LM]/.test(call));
+  if (c.fields.includes("exch") && needExch && !$("exch").value.trim()) {
+    $("msg").textContent = "Their " + (c.exch_label || "exchange").toLowerCase() + "?" + (c.key === "jwfd" ? " (00 for a home station)" : "");
+    $("exch").focus(); return;
+  }
   if (status === "dupe" && !dupeArmed) { dupeArmed = true; $("msg").textContent = "Dupe - press Enter again to log it anyway, Esc to clear"; return; }
   const serial = nextSerial();
   const q = {
@@ -631,8 +639,14 @@ $("st-save").onclick = async () => {
 };
 $("newevent").onclick = () => {
   $("ev-contest").innerHTML = S.contests.map(c => `<option value="${c.key}">${esc(c.name)}</option>`).join("");
-  $("ev-name").value = ""; $("dlg-event").showModal(); $("ev-name").focus();
+  $("ev-name").value = ""; evInfo(); $("dlg-event").showModal(); $("ev-name").focus();
 };
+function evInfo() {
+  const c = S.contests.find(x => x.key === $("ev-contest").value) || {};
+  $("ev-info").innerHTML = (c.when ? esc(c.when) + ". " : "") +
+    (c.rules_url ? `<a href="${esc(c.rules_url)}" target="_blank" rel="noopener" style="color:var(--blue)">Read the rules &#8599;</a>` : "For everyday contacts, and for contests QSODesk does not score yet.");
+}
+$("ev-contest").onchange = evInfo;
 $("ev-cancel").onclick = () => $("dlg-event").close();
 $("ev-save").onclick = async () => {
   try { await api("/api/event", {name: $("ev-name").value, contest: $("ev-contest").value}); }
