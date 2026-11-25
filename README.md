@@ -3,10 +3,38 @@
 A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
-**Version 0.5.** The logger (fast entry line, five ZL/VK contests, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
+**Version 0.6.** The logger (fast entry line, five ZL/VK contests, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
 **dashboard** and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
+
+## Install on a Raspberry Pi
+
+    git clone https://github.com/gomeznz/QSOdeck.git
+    cd QSOdeck
+    sh tools/install-pi.sh
+    sudo reboot
+
+That installs Hamlib and the audio tools and sets QSODesk to start at boot.
+Then open **http://qsodesk.local** on any device on the same network.
+
+To update later: `cd ~/QSOdeck && git pull && sudo systemctl restart qsodesk`
+
+### Finding it on the network (mDNS)
+
+QSODesk answers to a name on the local network, with nothing extra to
+install: `qsodesk.local` by default. Change it under **Settings > Network
+name**; give each QSODesk on the same network its own name (for example
+`station-80m`). Settings shows the exact address to use.
+
+When started by the installer above, QSODesk also answers on port 80, so the
+address is simply `http://qsodesk.local`. Run by hand, it is
+`http://qsodesk.local:8073`.
+
+`.local` names work on macOS, iOS, Windows 10/11, Linux and recent Android.
+If a device will not resolve the name, use the Pi's IP address instead. The
+name is local-network only and needs no internet, so it works in the field
+on the Pi's own Wi-Fi network too.
 
 ## Try it
 

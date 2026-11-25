@@ -150,6 +150,24 @@ class MoreContests(unittest.TestCase):
         self.assertEqual(len(contests.catalogue()), 10)
 
 
+class MDNSPackets(unittest.TestCase):
+    def test_packets(self):
+        import struct
+        from qsodesk import mdns
+        self.assertEqual(mdns.clean_name("QSO Desk 80m!"), "qso-desk-80m")
+        self.assertEqual(mdns.clean_name(""), "qsodesk")
+        q = struct.pack("!HHHHHH", 0, 0, 2, 0, 0, 0) + mdns.encode_name("QSOdesk.local") + \
+            struct.pack("!HH", 1, 1) + b"\x05other\xc0\x14" + struct.pack("!HH", 28, 1)
+        self.assertEqual(mdns.questions(q), [("qsodesk.local", 1), ("other.local", 28)])
+        a = mdns.answer("qsodesk.local", "192.168.1.50", 7)
+        self.assertEqual(mdns.questions(a), [])                       # a response is not a question
+        self.assertEqual(struct.unpack("!HHHH", a[:8]), (7, 0x8400, 0, 1))
+        self.assertTrue(a.endswith(bytes([192, 168, 1, 50])))
+        name, pos = mdns.read_name(a, 12)
+        self.assertEqual(name, "qsodesk.local")
+        self.assertEqual(mdns.questions(b"\x00\x01"), [])             # junk is ignored
+
+
 class FT8Messages(unittest.TestCase):
     def test_parse(self):
         from qsodesk import ft8
