@@ -227,6 +227,17 @@ class SpaceWx(unittest.TestCase):
         kp = sw.parse_kp([{"time_tag": "2026-11-24T06:00:00", "kp_index": 3}])
         self.assertEqual(kp[0]["kp"], 3)
         self.assertEqual(sw.build({})["kp"], None)            # nothing fetched: no crash
+        # solar flux in whichever layout NOAA uses
+        for flux in ({"Flux": "142"}, [{"time_tag": "2026-11-23", "flux": 150}, {"time_tag": "2026-11-24", "flux": 142}],
+                     [["time_tag", "flux"], ["2026-11-24", "142"]], {"summary": {"observed_flux": 142.0}},
+                     [{"time_tag": "2026-11-24T20:00", "frequency": 2800, "flux": 142}]):
+            self.assertEqual(sw.build({"flux": flux})["sfi"], 142, flux)
+        self.assertEqual(sw.build({"flux": {"odd": 1}, "flux2": [{"time_tag": "x", "frequency": 2800, "flux": 139}]})["sfi"], 139)
+        many = [{"time_tag": "2026-11-24", "frequency": 2800, "flux": 141}, {"time_tag": "2026-11-24", "frequency": 8800, "flux": 260}]
+        self.assertEqual(sw.build({"flux2": many})["sfi"], 141)   # picks the 2800 MHz (10.7 cm) row
+        self.assertEqual(sw.build({"wind": [{"time_tag": "a", "proton_speed": 480}]})["wind"], 480)
+        self.assertEqual(sw.build({"mag": {"Bt": "9", "Bz": "-6"}})["bz"], -6)
+        self.assertEqual(sw.shape([{"a": 1}, {"a": 2}])[0], "2 items")
 
 
 class Transceivers(unittest.TestCase):

@@ -21,6 +21,7 @@ FEEDS = {
     "scales": "/products/noaa-scales.json",
     "kp": "/products/noaa-planetary-k-index.json",
     "flux": "/products/summary/10cm-flux.json",
+    "flux2": "/json/f107_cm_flux.json",
     "wind": "/products/summary/solar-wind-speed.json",
     "mag": "/products/summary/solar-wind-mag-field.json",
     "alerts": "/products/alerts.json",
@@ -59,6 +60,46 @@ def _rows(data):
         head = [str(h) for h in data[0]]
         return [dict(zip(head, r)) for r in data[1:] if isinstance(r, list)]
     return []
+
+
+def _latest(data):
+    """The newest record of a feed, whatever shape it arrives in."""
+    rows = _rows(data)
+    if not rows:
+        return {}
+    stamped = [r for r in rows if _pick(r, "time_tag", "TimeStamp")]
+    if len(stamped) == len(rows) and len(rows) > 1:
+        return max(rows, key=lambda r: str(_pick(r, "time_tag", "TimeStamp")))
+    return rows[-1]
+
+
+def find_num(data, words, lo=None, hi=None):
+    """First sensible number stored under a key containing one of `words`,
+    looking in the newest record first and then inside nested objects."""
+    seen = [_latest(data)] if not isinstance(data, dict) else [data]
+    for _ in range(4):
+        nxt = []
+        for d in seen:
+            if not isinstance(d, dict):
+                continue
+            for k, v in d.items():
+                if any(w in str(k).lower() for w in words) and not isinstance(v, (dict, list)):
+                    n = _num(v)
+                    if n is not None and (lo is None or n >= lo) and (hi is None or n <= hi):
+                        return n
+            nxt += [v if isinstance(v, dict) else _latest(v) for v in d.values()
+                    if isinstance(v, (dict, list))]
+        seen = nxt
+    return None
+
+
+def shape(data, depth=0):
+    """A short description of a feed's layout, for troubleshooting."""
+    if isinstance(data, dict):
+        return {str(k): shape(v, depth + 1) for k, v in list(data.items())[:12]} if depth < 3 else "{...}"
+    if isinstance(data, list):
+        return ["%d items" % len(data)] + [shape(x, depth + 1) for x in data[:2] + data[-1:]] if depth < 3 else "[...]"
+    return data if not isinstance(data, str) else data[:60]
 
 
 def parse_kp(data):
@@ -135,7 +176,10 @@ def band_guide(sfi, kp):
 def build(raw, now=None):
     kp = parse_kp(raw.get("kp"))
     latest = kp[-1] if kp else None
-    sfi = _num(_pick(raw.get("flux") or {}, "Flux", "flux", "f10.7"))
+    f2 = _rows(raw.get("flux2"))
+    f2 = [r for r in f2 if _num(_pick(r, "frequency")) in (None, 2800.0)]     # the 10.7 cm reading
+    sfi = (find_num(raw.get("flux"), ("flux", "f10"), 40, 500)
+           or find_num(f2, ("flux",), 40, 500))
     scales = parse_scales(raw.get("scales")) or {"now": None, "forecast": []}
     k = latest["kp"] if latest else None
     return {
@@ -143,9 +187,9 @@ def build(raw, now=None):
         "a": latest["a"] if latest else None,
         "kp_word": KP_WORDS[max(0, min(9, int(round(k))))] if k is not None else "",
         "kp_history": [x["kp"] for x in kp[-8:]],
-        "wind": _num(_pick(raw.get("wind") or {}, "WindSpeed", "proton_speed", "speed")),
-        "bt": _num(_pick(raw.get("mag") or {}, "Bt", "bt")),
-        "bz": _num(_pick(raw.get("mag") or {}, "Bz", "bz_gsm", "bz")),
+        "wind": find_num(raw.get("wind"), ("speed",), 100, 3000),
+        "bt": find_num(raw.get("mag"), ("bt",), 0, 200),
+        "bz": find_num(raw.get("mag"), ("bz",), -200, 200),
         "scales": scales, "alerts": parse_alerts(raw.get("alerts"), now),
         "bands": band_guide(sfi, k),
     }
@@ -157,6 +201,7 @@ class SpaceWeather:
         self.lock = threading.Lock()
         self.busy = False
         self.cache = {"fetched": 0, "data": None, "error": ""}
+        self.shapes = {}                    # layout of each feed as last fetched
         try:
             with open(self.path) as fh:
                 self.cache.update(json.load(fh))
@@ -172,9 +217,12 @@ class SpaceWeather:
                     raw[key] = json.loads(r.read().decode("utf-8", "replace"))
             except Exception as exc:
                 errors.append("%s: %s" % (key, exc))
+        self.shapes = {k: shape(v) for k, v in raw.items()}
+        self.shapes["errors"] = errors
         with self.lock:
             if raw.get("kp") or raw.get("flux") or raw.get("scales"):
-                self.cache = {"fetched": time.time(), "data": build(raw), "error": ""}
+                self.cache = {"fetched": time.time(), "data": build(raw), "error": "",
+                              "tried": time.time()}
                 try:
                     with open(self.path, "w") as fh:
                         json.dump(self.cache, fh)
@@ -190,7 +238,8 @@ class SpaceWeather:
         with self.lock:
             age = time.time() - self.cache.get("fetched", 0)
             tried = time.time() - self.cache.get("tried", 0)
-            if age > MAX_AGE and tried > 60 and not self.busy:
+            incomplete = bool(self.cache.get("data")) and self.cache["data"].get("sfi") is None
+            if (age > MAX_AGE or incomplete) and tried > 60 and not self.busy:
                 self.busy = True
                 threading.Thread(target=self._fetch, daemon=True).start()
             out = dict(self.cache)

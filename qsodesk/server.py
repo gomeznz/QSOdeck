@@ -325,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
                 out += adif_record(q, app.store.settings())
             return self.send(out, "text/plain", filename="qsodesk-%s.adi" % (p.get("scope") or "all"))
         if path == "/api/spaceweather":
+            if p.get("debug"):                  # what NOAA actually sent, for troubleshooting
+                return self.send({"feeds": app.spacewx.shapes, "result": app.spacewx.get()})
             return self.send(app.spacewx.get())
         if path == "/api/ft8":
             return self.send(app.ft8.status())
