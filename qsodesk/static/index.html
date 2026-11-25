@@ -180,6 +180,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
             </div>
           </div>
         </div>
+        <div id="rigext" style="font-family:var(--mono);font-size:13px;color:var(--dim);margin-top:8px"></div>
         <div class="note" id="rignote"></div>
       </div>
 
@@ -480,7 +481,15 @@ function renderRadio() {
   const many = S && S.radios.length > 1;
   tag.textContent = (many ? "" : (r.label ? r.label + ": " : "")) + (!r.connected ? "NO RADIO" : r.simulated ? "SIMULATED" : r.name);
   tag.className = "tag " + (!r.connected ? "bad" : r.simulated ? "sim" : "live");
-  $("rignote").textContent = r.note || "";
+  $("rignote").textContent = r.note || (r.ext && r.ext.note) || "";
+  let x = "";
+  if (r.ext) {
+    const m = r.ext.meters, c = r.ext.controls;
+    x = r.tx ? `<b style="color:var(--red)">TX</b>  ${m.power.toFixed(0)} W   SWR <b style="color:${m.swr >= 2.5 ? "var(--red)" : m.swr >= 1.8 ? "var(--amber)" : "var(--green)"}">${m.swr ? m.swr.toFixed(1) : "-"}</b>   ALC ${m.alc}%`
+      : [c.rfpower != null ? c.rfpower + " W" : "", c.filter ? "FIL " + (c.filter >= 1000 ? c.filter / 1000 + "k" : c.filter) : "", c.nb ? "NB" : "", c.nr ? "NR" : "",
+         c.preamp ? "PRE" + c.preamp : "", c.att ? "ATT" : "", c.tuner ? "TUNER" : ""].filter(Boolean).join("  \u00b7  ");
+  }
+  $("rigext").innerHTML = x;
   let bars = "";
   for (let k = 1; k <= 9; k++) bars += `<i class="${r.smeter != null && k <= r.smeter ? "lit" : ""}" style="height:${6 + k * 1.8}px"></i>`;
   $("smeter").innerHTML = bars;

@@ -38,33 +38,121 @@ def detect_usb_rigs():
     return found
 
 
+FILTERS = {"PH": [1800, 2400, 3000], "CW": [250, 500, 1200], "DIG": [500, 1200, 3000]}
+FILTER_DEFAULT = {"PH": 2400, "CW": 500, "DIG": 3000}
+
+# What each pretend radio is modelled on. Ranges are receive coverage in Hz.
+SIM_MODELS = {
+    "generic": {"name": "Simulated radio", "max_power": 100, "tuner": True, "amps": 0.17,
+                "idle": 1.0, "ranges": [(100000, 470000000)]},
+    "ic7300": {"name": "IC-7300 (simulated)", "max_power": 100, "tuner": True, "amps": 0.17,
+               "idle": 0.9, "ranges": [(30000, 74800000)]},
+    "ic705": {"name": "IC-705 (simulated)", "max_power": 10, "tuner": False, "amps": 0.26,
+              "idle": 0.4, "ranges": [(30000, 199999999), (400000000, 470000000)]},
+}
+
+
+def _group(rmode):
+    return contests.MODE_GROUP.get((rmode or "").upper(), "PH")
+
+
 class SimRadio:
+    """A pretend transceiver. Besides frequency and mode it mimics the
+    controls and meters a real rig reports through Hamlib: RF power, filter
+    width, noise blanker and reduction, preamp, attenuator, tuner, and on
+    transmit the power, SWR, ALC, supply voltage and current meters.
+
+    Its pretend antenna is resonant in the middle of each band, so SWR climbs
+    towards the band edges, power folds back when SWR is high, and transmit
+    is inhibited outside the amateur bands - as on a real radio."""
     simulated = True
 
-    def __init__(self):
-        self.name = "Simulated radio"
+    def __init__(self, model="generic"):
+        self.model = model if model in SIM_MODELS else "generic"
+        self.spec = SIM_MODELS[self.model]
+        self.name = self.spec["name"]
         self.freq = 3650000
         self.rmode = "LSB"
         self._s = 5.0
+        self.ptt = False
+        self.tx_until = 0
+        self.c = {"rfpower": self.spec["max_power"], "filter": 2400, "nb": False, "nr": False,
+                  "preamp": 0, "att": False, "tuner": False}
+
+    # ---- what the meters would read --------------------------------------
+    def _swr(self):
+        for name, lo, hi in contests.BANDS:
+            if lo <= self.freq <= hi:
+                off = abs(self.freq - (lo + hi) / 2.0) / ((hi - lo) / 2.0)
+                swr = 1.15 + 2.3 * off * off
+                return min(swr, 1.25) if self.c["tuner"] and self.spec["tuner"] else swr
+        return None                                   # outside the amateur bands
+
+    def transmitting(self):
+        return self.ptt or time.time() < self.tx_until
 
     def poll(self):
         self._s = max(1.0, min(9.0, self._s + random.uniform(-0.6, 0.6)))
-        return {"freq": self.freq, "rmode": self.rmode, "smeter": round(self._s)}
+        s = self._s + self.c["preamp"] - (3 if self.c["att"] else 0)
+        tx = self.transmitting()
+        swr = self._swr()
+        meters = {"power": 0, "swr": None, "alc": 0}
+        note = ""
+        if tx and swr is None:
+            note = "Outside the amateur bands - transmit inhibited"
+            tx = False
+        if tx:
+            fold = 1.0 if swr < 2.0 else 2.0 / swr              # protection folds power back
+            power = self.c["rfpower"] * fold * random.uniform(0.96, 1.0)
+            meters = {"power": round(power, 1), "swr": round(swr + random.uniform(-0.03, 0.03), 2),
+                      "alc": int(random.uniform(35, 55) if fold == 1.0 else random.uniform(70, 95))}
+        amps = self.spec["idle"] + meters["power"] * self.spec["amps"]
+        meters["id"] = round(amps, 1)
+        meters["vd"] = round(13.8 - amps * 0.03, 1)
+        caps = {"model": self.spec["name"], "max_power": self.spec["max_power"],
+                "tuner": self.spec["tuner"], "filters": FILTERS[_group(self.rmode)],
+                "can": ["rfpower", "filter", "nb", "nr", "preamp", "att"] + (["tuner"] if self.spec["tuner"] else [])}
+        return {"freq": self.freq, "rmode": self.rmode, "smeter": 0 if tx else max(0, min(9, round(s))),
+                "tx": tx, "ext": {"controls": dict(self.c), "meters": meters, "caps": caps, "note": note}}
 
+    # ---- commands ---------------------------------------------------------
     def set_freq(self, hz):
-        self.freq = int(hz)
+        hz = int(hz)
+        if not any(lo <= hz <= hi for lo, hi in self.spec["ranges"]):
+            raise IOError("%s does not cover %.3f MHz" % (self.spec["name"], hz / 1e6))
+        self.freq = hz
 
     def set_mode(self, rmode):
+        if _group(rmode) != _group(self.rmode):
+            self.c["filter"] = FILTER_DEFAULT[_group(rmode)]
         self.rmode = rmode
+
+    def set_control(self, name, value):
+        if name == "rfpower":
+            self.c["rfpower"] = int(max(1, min(self.spec["max_power"], round(float(value)))))
+        elif name == "filter":
+            self.c["filter"] = int(value)
+        elif name == "preamp":
+            self.c["preamp"] = int(value) % 3
+        elif name in ("nb", "nr", "att", "tuner"):
+            self.c[name] = bool(value)
+        else:
+            raise IOError("unknown control %s" % name)
 
     def set_ptt(self, on):
         self.ptt = bool(on)
+
+    def tx_for(self, seconds):
+        self.tx_until = time.time() + seconds
+
+    def tune_carrier(self):
+        self.tx_for(3)
 
     def send_morse(self, text, wpm):
         pass                    # the simulator plays the Morse as audio instead
 
     def stop_morse(self):
-        pass
+        self.tx_until = 0
 
     def close(self):
         pass
@@ -75,6 +163,9 @@ class RigctldRadio:
 
     def __init__(self, host, port, name="Radio (rigctld)"):
         self.name = name
+        self.max_power = 10 if "705" in name else 100
+        self._n = 0
+        self._ext = None
         self.sock = socket.create_connection((host, int(port)), timeout=2)
         self.fh = self.sock.makefile("rwb")
         self.lock = threading.Lock()
@@ -102,7 +193,72 @@ class RigctldRadio:
             smeter = max(0, min(9, int(round(9 + db / 6.0))))
         except (IOError, IndexError, ValueError):
             pass
-        return {"freq": freq, "rmode": rmode, "smeter": smeter}
+        out = {"freq": freq, "rmode": rmode, "smeter": smeter}
+        self._n += 1
+        try:
+            out["tx"] = self._cmd("t", 1)[0] == "1"
+        except (IOError, IndexError):
+            out["tx"] = False
+        if self._ext is None or out["tx"] or self._n % 5 == 0:
+            self._ext = self._extras(out["tx"], rmode)        # the slower extras, now and then
+        out["ext"] = self._ext
+        return out
+
+    # Extra controls and meters. NOTE: untested against real radios; anything
+    # a radio or Hamlib version does not support is simply left out.
+    def _level(self, name):
+        try:
+            return float(self._cmd("l " + name, 1)[0])
+        except (IOError, IndexError, ValueError):
+            return None
+
+    def _func(self, name):
+        try:
+            return self._cmd("u " + name, 1)[0] == "1"
+        except (IOError, IndexError):
+            return None
+
+    def _extras(self, tx, rmode):
+        c, can = {}, []
+        p = self._level("RFPOWER")
+        if p is not None:
+            c["rfpower"] = int(round(p * self.max_power))
+            can.append("rfpower")
+        for f in ("nb", "nr", "tuner"):
+            v = self._func(f.upper())
+            if v is not None:
+                c[f] = v
+                can.append(f)
+        try:
+            c["filter"] = int(float(self._cmd("m", 2)[1]))
+            can.append("filter")
+        except (IOError, IndexError, ValueError):
+            pass
+        meters = {"power": 0, "swr": None, "alc": 0}
+        if tx:
+            pm, swr, alc = self._level("RFPOWER_METER"), self._level("SWR"), self._level("ALC")
+            meters = {"power": round((pm or 0) * self.max_power, 1), "swr": swr,
+                      "alc": int((alc or 0) * 100)}
+        caps = {"model": self.name, "max_power": self.max_power, "tuner": "tuner" in can,
+                "filters": FILTERS[_group(rmode)], "can": can}
+        return {"controls": c, "meters": meters, "caps": caps, "note": ""}
+
+    def set_control(self, name, value):
+        if name == "rfpower":
+            self._cmd("L RFPOWER %.3f" % (max(1.0, float(value)) / self.max_power), 1)
+        elif name in ("nb", "nr", "tuner"):
+            self._cmd("U %s %d" % (name.upper(), 1 if value else 0), 1)
+        elif name == "filter":
+            self._cmd("M %s %d" % (self._cmd("m", 2)[0], int(value)), 1)
+        else:
+            raise IOError("%s cannot be set on this radio" % name)
+        self._ext = None
+
+    def tune_carrier(self):
+        self._cmd("U TUNER 2", 1)                 # start the radio's own antenna tuner
+
+    def tx_for(self, seconds):
+        pass
 
     def set_freq(self, hz):
         self._cmd("F %d" % int(hz), 1)
@@ -190,7 +346,7 @@ class RadioManager(threading.Thread):
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(1.5)
                 return RigctldRadio("127.0.0.1", self.rig_port, rig["name"])
-        return SimRadio()
+        return SimRadio(c.get("sim_model") or "generic")
 
     def run(self):
         last = None
@@ -252,6 +408,37 @@ class RadioManager(threading.Thread):
         if self.radio:
             self.radio.set_ptt(on)
 
+    def tx_for(self, seconds):
+        if self.radio:
+            self.radio.tx_for(seconds)
+
+    def tune_carrier(self):
+        if self.radio:
+            self.radio.tune_carrier()
+
+    def adjust(self, name, value=None, delta=None):
+        """Set a control, nudge it by `delta`, or (with neither) toggle/step it."""
+        if not self.radio:
+            raise IOError("radio not connected")
+        ext = self.state.get("ext") or {}
+        cur = (ext.get("controls") or {}).get(name)
+        caps = ext.get("caps") or {}
+        if name not in (caps.get("can") or []):
+            raise IOError("This radio does not offer %s" % name)
+        if value is None:
+            if delta is not None:
+                value = (cur or 0) + delta
+            elif name == "filter":
+                opts = caps.get("filters") or [cur]
+                value = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else opts[0]
+            elif name == "preamp":
+                value = ((cur or 0) + 1) % 3
+            else:
+                value = not cur
+        with self.lock:
+            self.radio.set_control(name, value)
+        return value
+
     def send_morse(self, text, wpm):
         if self.radio:
             self.radio.send_morse(text, wpm)
@@ -301,7 +488,8 @@ class RadioHub:
             clean.append({"id": rid, "name": (c.get("name") or "Radio").strip()[:30], "source": src,
                           "path": c.get("path") or "", "model": c.get("model") or 0,
                           "host": (c.get("host") or "127.0.0.1").strip(),
-                          "port": int(c.get("port") or 4532), "audio": (c.get("audio") or "").strip()})
+                          "port": int(c.get("port") or 4532), "audio": (c.get("audio") or "").strip(),
+                          "sim_model": c.get("sim_model") if c.get("sim_model") in SIM_MODELS else "generic"})
         if not clean:
             raise ValueError("Keep at least one transceiver")
         self.store.set_settings({"radios": json.dumps(clean)})

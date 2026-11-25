@@ -3,7 +3,7 @@
 A station logger for the Raspberry Pi with radio control built in, designed
 around fast contest logging for ZL and VK operating.
 
-**Version 0.6.** The logger (fast entry line, five ZL/VK contests, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
+**Version 0.7.** The logger (fast entry line, five ZL/VK contests, crash-proof storage, one radio) plus a **transceiver manager** for several radios, **keypad mapping**, a customisable
 **dashboard** and three radio pages: a **waterfall**, **CW** send and decode, and **FT8**. Multi-operator and
 remote stations come next; the log already records station and operator for
 every contact so nothing needs reworking later.
@@ -137,6 +137,28 @@ name, such as "80 m station".
   each contact as the station.
 - **Waterfall, CW and FT8** work with one transceiver at a time. Choose which
   on the Radios page or from the selector at the top of those pages.
+
+### Pretend radios
+
+A simulated radio can mimic a particular model: choose **Simulated radio**
+and then "Pretend to be" IC-7300, IC-705 or a generic rig. It behaves like
+the real one where it matters:
+
+- **Controls:** RF power, filter width, noise blanker, noise reduction,
+  preamp, attenuator and (IC-7300) antenna tuner, on each radio's card.
+- **Meters on transmit:** power, SWR, ALC, supply voltage and current.
+- **A pretend antenna** resonant mid-band: SWR climbs towards the band edges,
+  power folds back when SWR is high, and the tuner brings it back down.
+- **Model limits:** the IC-705 is a 10 W radio with 2 m and 70 cm and no
+  tuner; the IC-7300 is 100 W and stops at 74.8 MHz. Transmit is inhibited
+  outside the amateur bands.
+
+"Test transmit 3 s" keys the pretend radio so you can watch the meters;
+sending CW or FT8 does the same. The Logger shows a compact power / SWR line,
+and the keypad can be mapped to RF power, filter, NB, NR, tuner and tune.
+
+The same controls and meters are wired up for real radios through Hamlib,
+but that path is untested: anything a radio does not report is left out.
 
 Tested with simulated radios only. Running two real USB radios on one Pi
 (each needs its own Hamlib port and sound card) has not been tried yet.

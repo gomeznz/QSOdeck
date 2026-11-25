@@ -209,6 +209,7 @@ class FT8:
         try:
             if self.simulated():
                 self.sim.heard(slot, msg, mycall)
+                self.app.radio.tx_for(13.1)                       # show it on the meters
                 self.app.audio.play(samples=ft8_lookalike(msg, self.tx_freq, 5000))
             else:
                 gen = find_tool("gen_ft8")

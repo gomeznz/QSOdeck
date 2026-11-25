@@ -18,6 +18,13 @@ const QDKeys = (() => {
     mode_next: {name: "Next mode"},
     wpm_up:    {name: "CW speed up", arg: "WPM step", def: "2", repeat: true},
     wpm_down:  {name: "CW speed down", arg: "WPM step", def: "2", repeat: true},
+    power_up:  {name: "RF power up", arg: "Step in watts", def: "5", repeat: true},
+    power_down:{name: "RF power down", arg: "Step in watts", def: "5", repeat: true},
+    filter:    {name: "Next filter width"},
+    nb:        {name: "Noise blanker on/off"},
+    nr:        {name: "Noise reduction on/off"},
+    tuner:     {name: "Antenna tuner on/off"},
+    tune:      {name: "Tune (transmits briefly)"},
     radio_next:{name: "Switch to the next transceiver"},
     ft8_cq:    {name: "FT8: call CQ"},
     ft8_halt:  {name: "FT8: halt transmit"},
@@ -73,6 +80,15 @@ const QDKeys = (() => {
         return page(action);
       }
       if (action === "go") { const p = (arg || "logger").toLowerCase().trim(); location.href = p === "logger" ? "/" : p === "radios" ? "/transceivers" : "/" + p; return; }
+      if (action === "power_up" || action === "power_down") {
+        const r = await api("/api/radio/set", {radio: radioId(), name: "rfpower", delta: (action === "power_up" ? 1 : -1) * (Number(arg) || 5)});
+        return toast("RF power " + Math.max(1, r.value) + " W");
+      }
+      if (["filter", "nb", "nr", "tuner"].includes(action)) {
+        const r = await api("/api/radio/set", {radio: radioId(), name: action});
+        return toast(action === "filter" ? "Filter " + r.value + " Hz" : action.toUpperCase() + (r.value ? " on" : " off"));
+      }
+      if (action === "tune") { await api("/api/radio/tune", {radio: radioId()}); return toast("Tuning"); }
       if (action === "cw_stop") { await api("/api/cw/stop", {}); return toast("CW stopped"); }
       if (action === "ft8_cq") { await api("/api/ft8/cq", {}); return toast("FT8: calling CQ"); }
       if (action === "ft8_halt") { await api("/api/ft8/halt", {}); return toast("FT8: transmit halted"); }
