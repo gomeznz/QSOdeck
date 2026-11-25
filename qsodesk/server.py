@@ -13,12 +13,13 @@ from urllib.parse import parse_qs, urlparse
 from . import contests, reports
 from .audio import AudioEngine, cw_samples
 from .ft8 import FT8
+from .mdns import MDNS, clean_name
 from .radio import RadioHub
 from .spaceweather import SpaceWeather
 from .store import Store, adif_record
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-VERSION = "0.5"
+VERSION = "0.6"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/dashboard": "dashboard.html",
          "/transceivers": "transceivers.html", "/keypad": "keypad.html", "/reports": "reports.html",
          "/waterfall": "waterfall.html",
@@ -37,6 +38,16 @@ class App:
         self.ft8 = FT8(self)
         self.audio.start()
         self.spacewx = SpaceWeather(data_dir)
+        self.ports = []                     # filled in by serve()
+        self.mdns = MDNS(lambda: self.store.settings().get("net_name"))
+        self.mdns.start()
+
+    def network(self):
+        """How other devices on the network can reach this QSODesk."""
+        name = clean_name(self.store.settings().get("net_name"))
+        port = 80 if 80 in self.ports else (self.ports[0] if self.ports else 8073)
+        return {"name": name, "ok": self.mdns.ok, "error": self.mdns.error,
+                "url": "http://%s.local%s" % (name, "" if port == 80 else ":%d" % port)}
 
     # ---- transceivers -----------------------------------------------------
     @property
@@ -108,7 +119,7 @@ class App:
             "qsos": rows, "total_logged": len(live),
             "recovered": self.store.recovered, "audio": self.audio.status,
             "radios": [{"id": r["id"], "name": r["name"]} for r in self.hub.list()],
-            "audio_radio": self.radio.id,
+            "audio_radio": self.radio.id, "network": self.network(),
         }
 
     def check(self, p):
@@ -314,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
                 out += adif_record(q, app.store.settings())
             return self.send(out, "text/plain", filename="qsodesk-%s.adi" % (p.get("scope") or "all"))
         if path == "/api/spaceweather":
+            if p.get("debug"):                  # what NOAA actually sent, for troubleshooting
+                return self.send({"feeds": app.spacewx.shapes, "result": app.spacewx.get()})
             return self.send(app.spacewx.get())
         if path == "/api/ft8":
             return self.send(app.ft8.status())
@@ -369,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
             app.broadcast("log", {})
             return self.send({"qso": row, "saved": saved}, status=200 if row else 404)
         if path == "/api/settings":
+            if "net_name" in b:
+                b["net_name"] = clean_name(b["net_name"])
             app.store.set_settings(b)
             app.broadcast("log", {})
             return self.send({"ok": True})
@@ -489,11 +504,23 @@ def serve(data_dir, port=8073, host="0.0.0.0"):
     Handler.app = App(data_dir)
     httpd = ThreadingHTTPServer((host, port), Handler)
     httpd.daemon_threads = True
+    Handler.app.ports = [port]
+    if port != 80:                              # also answer on plain port 80 when allowed,
+        try:                                    # so the address needs no ":8073" on the end
+            extra = ThreadingHTTPServer((host, 80), Handler)
+            extra.daemon_threads = True
+            threading.Thread(target=extra.serve_forever, daemon=True).start()
+            Handler.app.ports.append(80)
+        except OSError:
+            pass
     print("QSODesk %s" % VERSION)
     print("Log and journal folder: %s" % os.path.abspath(data_dir))
     if Handler.app.store.recovered:
         print("Recovered %d contacts from the journal." % Handler.app.store.recovered)
     print("Open  http://localhost:%d  in your browser (Ctrl+C to stop)" % port)
+    time.sleep(0.3)
+    net = Handler.app.network()
+    print("On other devices:  %s" % net["url"] if net["ok"] else net["error"])
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

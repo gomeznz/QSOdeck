@@ -24,7 +24,7 @@ DEFAULTS = {
     "rigctld_host": "127.0.0.1", "rigctld_port": "4532",
     "mirror_dir": "", "tt_serial_per_band": "0",
     "grid": "", "audio_source": "auto", "audio_device": "", "cw_wpm": "22",
-    "dashboard": "", "radios": "", "audio_radio": "", "keymap": "",
+    "dashboard": "", "radios": "", "audio_radio": "", "keymap": "", "net_name": "qsodesk",
 }
 
 FIELDS = ["uuid", "event", "contest", "ts", "call", "band", "mode", "rmode",
